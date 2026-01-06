@@ -11,6 +11,7 @@ import { CalendarModule } from './modules/calendar/calendar.module';
 import { AgentModule } from './modules/agent/agent.module';
 import { HealthModule } from './modules/health/health.module';
 import { EmailModule } from './modules/email/email.module';
+import { WaitlistModule } from './modules/waitlist/waitlist.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { EmailModule } from './modules/email/email.module';
     HealthModule,
     AuthModule,
     TasksModule,
+    WaitlistModule,
     CommunicationsModule,
     CalendarModule,
     AgentModule,
