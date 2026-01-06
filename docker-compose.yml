@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with pgvector
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: nexora-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-nexora}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-nexora_dev_password}
+      POSTGRES_DB: ${DATABASE_NAME:-nexora}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-nexora}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: nexora-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API (for development with hot reload)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nexora-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${DATABASE_USER:-nexora}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-nexora_dev_password}
+      DATABASE_NAME: ${DATABASE_NAME:-nexora}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-development_jwt_secret_change_in_production}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # For development, you might want to mount volumes:
+    # volumes:
+    #   - .:/app
+    #   - /app/node_modules
+
+volumes:
+  postgres_data:
+  redis_data:
