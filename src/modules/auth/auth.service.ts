@@ -15,7 +15,12 @@ import {
   VerificationToken,
   TokenType,
 } from './entities/verification-token.entity';
-import { RegisterDto, LoginDto, AuthResponseDto } from './dto/auth.dto';
+import {
+  RegisterDto,
+  LoginDto,
+  AuthResponseDto,
+  ResetPasswordDto,
+} from './dto/auth.dto';
 import { EmailService } from '@/modules/email/email.service';
 
 @Injectable()
@@ -169,6 +174,108 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
     return user;
+  }
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    const user = await this.userRepository.findOne({
+      where: { email: email.toLowerCase() },
+    });
+
+    // Always return success message to not reveal if user exists
+    const successMessage = {
+      message:
+        'Si existe una cuenta con ese correo, recibirás un enlace para restablecer tu contraseña.',
+    };
+
+    if (!user) {
+      return successMessage;
+    }
+
+    // Check for recent token (prevent spam)
+    const recentToken = await this.tokenRepository.findOne({
+      where: {
+        userId: user.id,
+        type: TokenType.PASSWORD_RESET,
+        createdAt: MoreThan(new Date(Date.now() - 60000)), // 1 minute
+      },
+    });
+
+    if (recentToken) {
+      throw new BadRequestException(
+        'Por favor espera al menos 1 minuto antes de solicitar otro enlace',
+      );
+    }
+
+    await this.createAndSendPasswordResetToken(user);
+
+    return successMessage;
+  }
+
+  async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
+    const resetToken = await this.tokenRepository.findOne({
+      where: {
+        token: dto.token,
+        type: TokenType.PASSWORD_RESET,
+      },
+      relations: ['user'],
+    });
+
+    if (!resetToken) {
+      throw new BadRequestException('Token inválido o expirado');
+    }
+
+    if (resetToken.isUsed()) {
+      throw new BadRequestException('Este enlace ya fue utilizado');
+    }
+
+    if (resetToken.isExpired()) {
+      throw new BadRequestException(
+        'El enlace ha expirado. Por favor solicita uno nuevo.',
+      );
+    }
+
+    // Mark token as used
+    resetToken.usedAt = new Date();
+    await this.tokenRepository.save(resetToken);
+
+    // Update user password
+    const user = resetToken.user;
+    user.password = await bcrypt.hash(dto.newPassword, 10);
+    await this.userRepository.save(user);
+
+    return { message: 'Contraseña actualizada exitosamente. Ya puedes iniciar sesión.' };
+  }
+
+  private async createAndSendPasswordResetToken(user: User): Promise<void> {
+    // Invalidate any existing password reset tokens
+    await this.tokenRepository.update(
+      {
+        userId: user.id,
+        type: TokenType.PASSWORD_RESET,
+        usedAt: undefined,
+      },
+      { usedAt: new Date() },
+    );
+
+    // Create new token (valid for 15 minutes)
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    const resetToken = this.tokenRepository.create({
+      token,
+      type: TokenType.PASSWORD_RESET,
+      userId: user.id,
+      expiresAt,
+    });
+
+    await this.tokenRepository.save(resetToken);
+
+    // Send email
+    await this.emailService.sendPasswordResetEmail(
+      user.email,
+      user.firstName,
+      token,
+    );
   }
 
   private async createAndSendVerificationToken(user: User): Promise<void> {

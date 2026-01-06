@@ -232,6 +232,113 @@ Tu Chief of Staff Digital
     });
   }
 
+  async sendPasswordResetEmail(
+    to: string,
+    firstName: string,
+    token: string,
+  ): Promise<boolean> {
+    const frontendUrl = this.configService.get<string>(
+      'FRONTEND_URL',
+      'http://localhost:5173',
+    );
+    const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Restablecer contraseña - Nexora</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7fa;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; background: linear-gradient(135deg, #1E40AF 0%, #7C3AED 100%); border-radius: 12px 12px 0 0;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">Nexora</h1>
+              <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">Tu Chief of Staff Digital</p>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="padding: 40px;">
+              <h2 style="margin: 0 0 20px; color: #1a1a1a; font-size: 22px;">¡Hola ${firstName}!</h2>
+              <p style="margin: 0 0 20px; color: #4a5568; font-size: 16px; line-height: 1.6;">
+                Recibimos una solicitud para restablecer la contraseña de tu cuenta. Si no realizaste esta solicitud, puedes ignorar este correo.
+              </p>
+
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td align="center" style="padding: 20px 0;">
+                    <a href="${resetUrl}" style="display: inline-block; padding: 16px 40px; background: linear-gradient(135deg, #1E40AF 0%, #7C3AED 100%); color: #ffffff; text-decoration: none; font-weight: 600; font-size: 16px; border-radius: 8px;">
+                      Restablecer contraseña
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 20px 0 0; color: #718096; font-size: 14px; line-height: 1.6;">
+                Si el botón no funciona, copia y pega este enlace en tu navegador:
+              </p>
+              <p style="margin: 8px 0 20px; color: #1E40AF; font-size: 14px; word-break: break-all;">
+                ${resetUrl}
+              </p>
+
+              <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+
+              <p style="margin: 0; color: #a0aec0; font-size: 13px;">
+                Este enlace expira en 15 minutos. Si no solicitaste restablecer tu contraseña, puedes ignorar este correo de forma segura.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 20px 40px; background-color: #f8fafc; border-radius: 0 0 12px 12px; text-align: center;">
+              <p style="margin: 0; color: #a0aec0; font-size: 12px;">
+                © 2026 Nexora Assistant. Todos los derechos reservados.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    `;
+
+    const text = `
+¡Hola ${firstName}!
+
+Recibimos una solicitud para restablecer la contraseña de tu cuenta.
+
+Para crear una nueva contraseña, visita el siguiente enlace:
+
+${resetUrl}
+
+Este enlace expira en 15 minutos.
+
+Si no solicitaste restablecer tu contraseña, puedes ignorar este correo.
+
+--
+Nexora Assistant
+Tu Chief of Staff Digital
+    `;
+
+    return this.sendEmail({
+      to,
+      subject: '🔐 Restablecer tu contraseña de Nexora',
+      html,
+      text,
+    });
+  }
+
   async verifyConnection(): Promise<boolean> {
     try {
       await this.transporter.verify();

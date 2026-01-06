@@ -80,3 +80,21 @@ export class ResendVerificationDto {
   @IsEmail()
   email: string;
 }
+
+export class ForgotPasswordDto {
+  @ApiProperty({ example: 'john@example.com' })
+  @IsEmail()
+  email: string;
+}
+
+export class ResetPasswordDto {
+  @ApiProperty({ description: 'Password reset token from email' })
+  @IsString()
+  token: string;
+
+  @ApiProperty({ example: 'NewSecurePass123!' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(50)
+  newPassword: string;
+}
