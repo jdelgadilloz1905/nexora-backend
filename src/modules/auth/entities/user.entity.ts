@@ -22,6 +22,9 @@ export class User extends BaseEntity {
   @Column({ default: true, name: 'is_active' })
   isActive: boolean;
 
+  @Column({ default: false, name: 'is_email_verified' })
+  isEmailVerified: boolean;
+
   @Column({ nullable: true, name: 'cognito_id' })
   cognitoId?: string;
 

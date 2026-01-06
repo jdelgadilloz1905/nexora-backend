@@ -47,17 +47,6 @@ export class RefreshTokenDto {
   refreshToken: string;
 }
 
-export class AuthResponseDto {
-  @ApiProperty()
-  accessToken: string;
-
-  @ApiProperty()
-  refreshToken: string;
-
-  @ApiProperty()
-  user: UserResponseDto;
-}
-
 export class UserResponseDto {
   @ApiProperty()
   id: string;
@@ -73,4 +62,21 @@ export class UserResponseDto {
 
   @ApiPropertyOptional()
   avatarUrl?: string;
+}
+
+export class AuthResponseDto {
+  @ApiProperty()
+  accessToken: string;
+
+  @ApiProperty()
+  refreshToken: string;
+
+  @ApiProperty({ type: UserResponseDto })
+  user: UserResponseDto;
+}
+
+export class ResendVerificationDto {
+  @ApiProperty({ example: 'john@example.com' })
+  @IsEmail()
+  email: string;
 }

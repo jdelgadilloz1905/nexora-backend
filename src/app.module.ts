@@ -10,6 +10,7 @@ import { CommunicationsModule } from './modules/communications/communications.mo
 import { CalendarModule } from './modules/calendar/calendar.module';
 import { AgentModule } from './modules/agent/agent.module';
 import { HealthModule } from './modules/health/health.module';
+import { EmailModule } from './modules/email/email.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { HealthModule } from './modules/health/health.module';
     ]),
 
     // Feature Modules
+    EmailModule,
     HealthModule,
     AuthModule,
     TasksModule,
