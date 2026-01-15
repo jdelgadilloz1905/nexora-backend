@@ -20,6 +20,8 @@ import {
   LoginDto,
   AuthResponseDto,
   ResetPasswordDto,
+  UpdateProfileDto,
+  ChangePasswordDto,
 } from './dto/auth.dto';
 import { EmailService } from '@/modules/email/email.service';
 
@@ -174,6 +176,54 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
     return user;
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto): Promise<User> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    if (dto.firstName !== undefined) {
+      user.firstName = dto.firstName;
+    }
+    if (dto.lastName !== undefined) {
+      user.lastName = dto.lastName;
+    }
+    if (dto.avatarUrl !== undefined) {
+      user.avatarUrl = dto.avatarUrl;
+    }
+
+    await this.userRepository.save(user);
+    return user;
+  }
+
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+  ): Promise<{ message: string }> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    if (!user.password) {
+      throw new BadRequestException('Este usuario no tiene contraseña configurada');
+    }
+
+    const isCurrentPasswordValid = bcrypt.compareSync(
+      dto.currentPassword,
+      user.password,
+    );
+
+    if (!isCurrentPasswordValid) {
+      throw new BadRequestException('La contraseña actual es incorrecta');
+    }
+
+    user.password = await bcrypt.hash(dto.newPassword, 10);
+    await this.userRepository.save(user);
+
+    return { message: 'Contraseña actualizada exitosamente' };
   }
 
   async forgotPassword(email: string): Promise<{ message: string }> {

@@ -1,4 +1,13 @@
-import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -24,5 +33,35 @@ export class AgentController {
     @Body() dto: ChatMessageDto,
   ): Promise<AgentResponseDto> {
     return this.agentService.chat(req.user.userId, dto);
+  }
+
+  @Get('conversations')
+  @ApiOperation({ summary: 'Get all conversations for the current user' })
+  getConversations(@Req() req: { user: { userId: string } }) {
+    return this.agentService.getConversations(req.user.userId);
+  }
+
+  @Get('conversations/:id')
+  @ApiOperation({ summary: 'Get a specific conversation with messages' })
+  getConversation(
+    @Req() req: { user: { userId: string } },
+    @Param('id') id: string,
+  ) {
+    return this.agentService.getConversation(req.user.userId, id);
+  }
+
+  @Delete('conversations/:id')
+  @ApiOperation({ summary: 'Delete a conversation' })
+  deleteConversation(
+    @Req() req: { user: { userId: string } },
+    @Param('id') id: string,
+  ) {
+    return this.agentService.deleteConversation(req.user.userId, id);
+  }
+
+  @Get('providers/status')
+  @ApiOperation({ summary: 'Get AI providers status' })
+  getProviderStatus() {
+    return this.agentService.getProviderStatus();
   }
 }

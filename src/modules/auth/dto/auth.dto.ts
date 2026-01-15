@@ -98,3 +98,36 @@ export class ResetPasswordDto {
   @MaxLength(50)
   newPassword: string;
 }
+
+export class UpdateProfileDto {
+  @ApiPropertyOptional({ example: 'John' })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(50)
+  firstName?: string;
+
+  @ApiPropertyOptional({ example: 'Doe' })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(50)
+  lastName?: string;
+
+  @ApiPropertyOptional({ example: 'https://bucket.s3.amazonaws.com/avatars/user-id/image.jpg' })
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
+}
+
+export class ChangePasswordDto {
+  @ApiProperty({ example: 'CurrentPass123!' })
+  @IsString()
+  currentPassword: string;
+
+  @ApiProperty({ example: 'NewSecurePass123!' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(50)
+  newPassword: string;
+}

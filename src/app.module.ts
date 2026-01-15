@@ -12,6 +12,7 @@ import { AgentModule } from './modules/agent/agent.module';
 import { HealthModule } from './modules/health/health.module';
 import { EmailModule } from './modules/email/email.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
+import { UploadModule } from './modules/upload/upload.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { WaitlistModule } from './modules/waitlist/waitlist.module';
     AuthModule,
     TasksModule,
     WaitlistModule,
+    UploadModule,
     CommunicationsModule,
     CalendarModule,
     AgentModule,
