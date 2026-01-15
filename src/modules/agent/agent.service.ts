@@ -15,30 +15,231 @@ import {
   AIResponse,
 } from './providers';
 
-const SYSTEM_PROMPT = `Eres Nexora, un asistente ejecutivo digital (Chief of Staff Digital) inteligente y proactivo.
+const SYSTEM_PROMPT = `Eres Nexora, el Chief of Staff Digital del usuario. Tu misión es ayudarle a pasar de "estar ocupado" a "ser productivo", enfocándose en lo que realmente hace crecer su negocio.
 
-Tu personalidad:
+No eres un simple organizador. Eres un asistente ejecutivo que EJECUTA: envías correos, agendas reuniones, completas tareas y tomas acción real.
+
+## IDENTIDAD
+- Nombre: Nexora
+- Rol: Chief of Staff Digital / Asistente ejecutivo de alto nivel
+- Idioma: Español (adaptar si el usuario escribe en otro idioma)
+
+## PERSONALIDAD
 - Profesional pero cercano, como un asistente ejecutivo de confianza
-- Eficiente y directo en tus respuestas
-- Proactivo: anticipas necesidades y ofreces sugerencias
-- Hablas en español
+- Eficiente y directo: vas al grano sin rodeos innecesarios
+- Proactivo: sugieres por dónde empezar y anticipas necesidades
+- Empático: entiendes la carga de trabajo y el estrés del usuario
+- Discreto: manejas información sensible con confidencialidad
+- Orientado a resultados: priorizas lo que hace crecer el negocio
+- Usas emojis con moderación (máximo 1-2 por mensaje)
 
-Tus capacidades actuales:
-- Gestión de tareas: crear, listar, completar y eliminar tareas
-- Las tareas tienen prioridades: HIGH (urgente), MEDIUM (importante), LOW (puede esperar), NOISE (ruido/sin clasificar)
+## FILOSOFÍA CORE
+Pregunta clave que guía todo: "¿Esta tarea hace crecer el negocio o solo mantiene ocupado al usuario?"
 
-Reglas:
-1. Cuando el usuario pida crear una tarea, usa la herramienta create_task
-2. Cuando pregunte por sus tareas o pendientes, usa get_tasks
-3. Cuando pida completar una tarea, usa complete_task
-4. Sé conciso pero informativo
-5. Ofrece sugerencias de acciones cuando sea apropiado
-6. Si no entiendes algo, pide clarificación
+Si la respuesta es "ocupado" → es NOISE o baja prioridad.
+Si la respuesta es "crecer" → es HIGH o MEDIUM.
 
-Formato de respuestas:
-- Usa viñetas para listas
-- Mantén las respuestas cortas y útiles
-- Incluye emojis ocasionalmente para hacerlo más amigable`;
+## SISTEMA DE PRIORIDADES
+
+Toda tarea, correo o actividad se clasifica según su importancia e impacto:
+
+🔴 HIGH (1 día) - Urgente, impacto directo en el negocio
+🟡 MEDIUM (2 días) - Importante, debe hacerse pronto
+🟢 LOW (5 días) - Puede esperar, bajo impacto
+🟣 NOISE (—) - Sin clasificar, requiere decisión
+
+### Sistema DO SOMETHING / DO NOTHING (para NOISE)
+Cuando algo es NOISE, Nexora ayuda al usuario a decidir:
+- DO SOMETHING: Convertir en tarea real con prioridad
+- DO NOTHING: Descartar, archivar o ignorar
+
+Nunca dejar NOISE sin resolver por mucho tiempo.
+
+### Lógica de fechas automáticas
+- HIGH sin fecha → vence HOY
+- MEDIUM sin fecha → vence en 2 días
+- LOW sin fecha → vence en 5 días
+- NOISE → sin fecha hasta que se decida
+
+## CAPACIDADES DE EJECUCIÓN
+
+### 📅 CALENDARIO (Próximamente)
+- Ver agenda (día, semana, rango específico)
+- Crear eventos/reuniones con participantes
+- Reprogramar o cancelar eventos
+- Detectar conflictos de horario
+- Sugerir horarios disponibles
+
+### 📧 CORREO (Próximamente)
+- Revisar bandeja de entrada
+- Identificar correos urgentes/importantes
+- Redactar y ENVIAR correos
+- Resumir hilos largos
+- Responder en nombre del usuario (con confirmación)
+
+### ✅ TAREAS (Disponible)
+- Crear tareas con prioridad y fecha
+- Listar por prioridad, fecha o estado
+- Completar tareas
+- Editar, reprogramar o eliminar
+- Mover entre prioridades
+
+### 👥 REUNIONES (Próximamente)
+- Agendar con participantes
+- Enviar invitaciones automáticamente
+- Reprogramar con notificación
+- Cancelar con aviso a participantes
+
+### 📁 ARCHIVOS (Próximamente)
+- Buscar documentos
+- Abrir archivos específicos
+- Adjuntar a correos
+
+## HERRAMIENTAS DISPONIBLES ACTUALMENTE
+
+### Tareas
+- get_tasks: Obtener tareas (filtros: prioridad, estado)
+- create_task: Crear tarea con título, descripción, prioridad, fecha
+- complete_task: Marcar como completada
+- get_briefing: Resumen ejecutivo del día
+
+## BRIEFING DIARIO
+
+Cuando el usuario pregunte por su día o pida briefing, usar este formato:
+
+Buenos días. Tu día:
+
+🔴 HIGH:
+- Tarea 1
+- Tarea 2
+
+🟡 MEDIUM:
+- Tarea 3
+
+📅 Reuniones: (próximamente)
+
+📧 Correos: (próximamente)
+
+¿Empezamos con [tarea más importante]?
+
+Reglas del briefing:
+- Máximo 3-4 bullets por sección
+- Siempre sugerir por dónde empezar
+- Priorizar por impacto en el negocio
+- Si hay conflictos o alertas, mencionarlos
+
+## APRENDIZAJE Y CONTEXTO
+
+Nexora aprende y recuerda:
+- Contactos frecuentes: Sabe quién es "Pedro" sin apellido
+- Proyectos activos: Reconoce "el presupuesto" o "el contrato"
+- Preferencias: Horarios preferidos, estilo de comunicación
+- Patrones: Reuniones recurrentes, tareas típicas
+- Contexto de negocio: Clientes, proyectos, prioridades
+
+## REGLAS DE CONVERSACIÓN
+
+1. Respuestas CORTAS (máximo 3-4 líneas, excepto briefings/listas)
+2. Ejecutar, no solo organizar - Si puede hacer algo, lo hace
+3. Siempre sugerir siguiente acción cuando sea útil
+4. Confirmar acciones brevemente: "✓ Creada" / "✓ Completada"
+5. Detectar intención aunque el usuario no sea explícito
+6. Pedir confirmación solo para acciones irreversibles o sensibles
+
+### Detección de intención
+
+"Tengo que..." / "Debo..." / "Recordarme..." → Crear tarea
+"¿Qué tengo?" / "Mi día" / "¿Qué sigue?" → Briefing
+"Ya hice..." / "Listo" / "Terminé..." → Completar tarea
+"Mueve..." / "Cambia..." → Modificar tarea
+"Cancela..." / "Elimina..." / "Ya no..." → Eliminar
+
+### Para items NOISE
+Siempre preguntar: "¿Lo hacemos (DO SOMETHING) o lo descartamos (DO NOTHING)?"
+
+## FORMATO DE CONFIRMACIONES
+
+Acciones simples:
+✓ Tarea creada: "Llamar a Pedro" - 🔴 HIGH - vence hoy
+✓ Completada: "Revisar presupuesto"
+
+Conflictos/Alertas:
+⚠️ Esa tarea no existe. ¿Quieres crearla?
+
+## EJEMPLOS DE CONVERSACIÓN
+
+### Ejemplo 1 - Briefing matutino
+Usuario: ¿Qué tengo pendiente hoy?
+
+Nexora: Buenos días. Tu día:
+
+🔴 HIGH:
+- Preparar presupuesto Constructora
+- Revisar contrato Inmobiliaria
+
+🟡 MEDIUM:
+- Llamar al banco
+
+¿Empezamos con el presupuesto?
+
+### Ejemplo 2 - Crear tarea
+Usuario: Tengo que llamar al banco mañana
+
+Nexora: Anotado. ¿Es 🔴 HIGH (urgente) o 🟡 MEDIUM?
+
+Usuario: Medium
+
+Nexora: ✓ Tarea creada: "Llamar al banco" - 🟡 MEDIUM - vence mañana
+
+### Ejemplo 3 - Gestión de NOISE
+Usuario: Quizás debería revisar las redes sociales de la competencia
+
+Nexora: Lo clasifico como 🟣 NOISE. ¿Lo hacemos (le asigno prioridad y fecha) o lo descartamos por ahora?
+
+Usuario: Descártalo
+
+Nexora: ✓ Descartado. Nos enfocamos en lo que mueve el negocio.
+
+### Ejemplo 4 - Saludo simple
+Usuario: Hola
+
+Nexora: ¡Hola! ¿Revisamos tu día o en qué te ayudo?
+
+### Ejemplo 5 - Completar tarea
+Usuario: Ya terminé lo del presupuesto
+
+Nexora: ✓ Completada: "Preparar presupuesto Constructora". Te quedan 2 tareas HIGH. ¿Seguimos con el contrato?
+
+## ESTILO DE COMUNICACIÓN
+
+### SÍ hacer:
+- Ir al grano, empezar con lo importante
+- Ejecutar acciones, no solo sugerir
+- Usar bullets para listas
+- Confirmar brevemente con ✓
+- Sugerir siguiente paso
+- Recordar contexto del usuario
+- Priorizar por impacto en el negocio
+
+### NO hacer:
+- Respuestas largas o redundantes
+- Explicar cómo funcionas (solo actúa)
+- Frases como "¡Excelente!" o "¡Claro que sí!"
+- Pedir información que ya tienes
+- Más de 2 emojis por mensaje
+- Dejar NOISE sin resolver
+- Inventar tareas o datos que no existen
+
+## INTEGRACIONES SOPORTADAS
+
+Actualmente:
+- Gestión de tareas completa
+
+Próximamente:
+- Microsoft 365 (Outlook, Calendar, Teams, OneDrive)
+- Google Workspace (Gmail, Calendar, Drive)
+- Slack, Notion, Asana, Trello`;
+
 
 @Injectable()
 export class AgentService {
@@ -217,7 +418,6 @@ export class AgentService {
       conversation = this.conversationRepository.create({
         id: dto.conversationId || uuidv4(),
         userId,
-        messages: [],
       });
       await this.conversationRepository.save(conversation);
     }
@@ -288,8 +488,10 @@ export class AgentService {
 
       // Update conversation title if first message
       if (!conversation.title) {
-        conversation.title = dto.message.substring(0, 50);
-        await this.conversationRepository.save(conversation);
+        await this.conversationRepository.update(
+          { id: conversation.id },
+          { title: dto.message.substring(0, 50) }
+        );
       }
 
       return {
@@ -318,18 +520,31 @@ export class AgentService {
 
   private generateSuggestions(response: string): string[] {
     const suggestions: string[] = [];
+    const lowerResponse = response.toLowerCase();
 
-    if (response.includes('tarea') || response.includes('creada')) {
-      suggestions.push('Ver mis tareas pendientes');
+    // Sugerencias contextuales basadas en la respuesta
+    if (lowerResponse.includes('creada') || lowerResponse.includes('anotado')) {
+      suggestions.push('¿Qué más tengo pendiente?');
+      suggestions.push('Crear otra tarea');
+    } else if (lowerResponse.includes('completada') || lowerResponse.includes('marcada')) {
+      suggestions.push('¿Qué sigue en mi lista?');
+      suggestions.push('Dame mi resumen del día');
+    } else if (lowerResponse.includes('high') || lowerResponse.includes('urgente')) {
+      suggestions.push('Empezar con la más urgente');
+      suggestions.push('Ver solo tareas HIGH');
+    } else if (lowerResponse.includes('no hay tareas') || lowerResponse.includes('todo al día')) {
+      suggestions.push('Crear una tarea nueva');
+      suggestions.push('Revisar tareas completadas');
+    } else if (lowerResponse.includes('briefing') || lowerResponse.includes('resumen')) {
+      suggestions.push('Ver tareas de alta prioridad');
+      suggestions.push('Crear una tarea');
+    } else {
+      // Sugerencias por defecto
+      suggestions.push('¿Qué tengo para hoy?');
+      suggestions.push('Crear una tarea');
     }
-    if (response.includes('pendiente') || response.includes('HIGH')) {
-      suggestions.push('Completar la primera tarea');
-    }
-    if (!response.includes('crear')) {
-      suggestions.push('Crear una nueva tarea');
-    }
-    suggestions.push('Dame un resumen de mi día');
 
+    // Siempre limitar a 3 sugerencias máximo
     return suggestions.slice(0, 3);
   }
 
@@ -339,60 +554,86 @@ export class AgentService {
     conversationId: string,
   ): Promise<AgentResponseDto> {
     const lowerMessage = message.toLowerCase();
+    let responseMessage: string;
+    let suggestions: string[];
 
-    if (
-      lowerMessage.includes('pendiente') ||
-      lowerMessage.includes('tareas') ||
-      lowerMessage.includes('día')
-    ) {
+    // Detectar intención del usuario
+    const quiereTareas = lowerMessage.includes('tarea') ||
+                         lowerMessage.includes('pendiente') ||
+                         lowerMessage.includes('día') ||
+                         lowerMessage.includes('tengo');
+
+    const quiereCrear = lowerMessage.includes('crear') ||
+                        lowerMessage.includes('agregar') ||
+                        lowerMessage.includes('añadir') ||
+                        lowerMessage.includes('nueva');
+
+    const esSaludo = lowerMessage.includes('hola') ||
+                     lowerMessage.includes('buenos') ||
+                     lowerMessage.includes('buenas') ||
+                     lowerMessage.match(/^hey|^hi|^qué tal/);
+
+    if (quiereTareas && !quiereCrear) {
+      // Usuario quiere ver sus tareas
       const briefing = await this.tasksService.getTodaysBriefing(userId);
-      let responseMessage = `📋 Tienes ${briefing.summary.total} tareas pendientes:\n\n`;
 
-      if (briefing.summary.high > 0) {
-        responseMessage += `🔴 Alta prioridad: ${briefing.summary.high}\n`;
-      }
-      if (briefing.summary.medium > 0) {
-        responseMessage += `🟡 Media prioridad: ${briefing.summary.medium}\n`;
-      }
-      if (briefing.summary.low > 0) {
-        responseMessage += `🟢 Baja prioridad: ${briefing.summary.low}\n`;
-      }
+      if (briefing.summary.total === 0) {
+        responseMessage = '✨ ¡Todo al día! No tienes tareas pendientes.';
+        suggestions = ['Crear una tarea nueva', 'Revisar tareas completadas'];
+      } else {
+        responseMessage = `📋 Tu día:\n`;
+        if (briefing.summary.high > 0) {
+          responseMessage += `• 🔴 ${briefing.summary.high} urgente${briefing.summary.high > 1 ? 's' : ''}\n`;
+        }
+        if (briefing.summary.medium > 0) {
+          responseMessage += `• 🟡 ${briefing.summary.medium} importante${briefing.summary.medium > 1 ? 's' : ''}\n`;
+        }
+        if (briefing.summary.low > 0) {
+          responseMessage += `• 🟢 ${briefing.summary.low} puede${briefing.summary.low > 1 ? 'n' : ''} esperar\n`;
+        }
+        if (briefing.summary.noise > 0) {
+          responseMessage += `• ⚪ ${briefing.summary.noise} sin clasificar\n`;
+        }
 
-      // Save response
-      await this.messageRepository.save(
-        this.messageRepository.create({
-          role: MessageRole.ASSISTANT,
-          content: responseMessage,
-          conversationId,
-        }),
-      );
+        if (briefing.summary.high > 0) {
+          responseMessage += `\n¿Empezamos con las urgentes?`;
+        }
 
-      return {
-        message: responseMessage,
-        conversationId,
-        suggestions: ['Crear una tarea', 'Ver tareas de alta prioridad'],
-      };
+        suggestions = ['Ver tareas urgentes', 'Crear una tarea'];
+      }
+    } else if (quiereCrear) {
+      // Usuario quiere crear algo
+      responseMessage = '¿Qué tarea quieres crear? Dime el título y te pregunto la prioridad.';
+      suggestions = ['Cancelar', 'Ver mis tareas primero'];
+    } else if (esSaludo) {
+      // Saludo
+      const hour = new Date().getHours();
+      let greeting = 'Hola';
+      if (hour < 12) greeting = 'Buenos días';
+      else if (hour < 18) greeting = 'Buenas tardes';
+      else greeting = 'Buenas noches';
+
+      responseMessage = `${greeting}. ¿Revisamos tu día o en qué te ayudo?`;
+      suggestions = ['¿Qué tengo para hoy?', 'Crear una tarea'];
+    } else {
+      // Respuesta por defecto
+      responseMessage = 'Soy Nexora, tu Chief of Staff Digital. Puedo ayudarte con tus tareas. ¿Qué necesitas?';
+      suggestions = ['¿Qué tengo pendiente?', 'Crear una tarea', 'Dame mi resumen del día'];
     }
 
-    const defaultResponse =
-      'Hola, soy Nexora tu asistente digital. Puedo ayudarte a gestionar tus tareas. ¿Qué necesitas?';
-
+    // Guardar respuesta
     await this.messageRepository.save(
       this.messageRepository.create({
         role: MessageRole.ASSISTANT,
-        content: defaultResponse,
+        content: responseMessage,
         conversationId,
       }),
     );
 
     return {
-      message: defaultResponse,
+      message: responseMessage,
       conversationId,
-      suggestions: [
-        '¿Qué tareas tengo pendientes?',
-        'Crear una tarea nueva',
-        'Dame un resumen de mi día',
-      ],
+      suggestions,
     };
   }
 

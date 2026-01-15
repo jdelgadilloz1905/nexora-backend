@@ -21,15 +21,24 @@ export class GeminiProvider implements IAIProvider {
   readonly name = AIProvider.GEMINI;
   private readonly logger = new Logger(GeminiProvider.name);
   private client: GoogleGenerativeAI | null = null;
-  private readonly modelName: string;
+  private readonly modelsToTry: string[];
 
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
-    this.modelName = this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
+    const configuredModel = this.configService.get<string>('GEMINI_MODEL');
+
+    // Lista de modelos a probar en orden (fallback) - modelos más recientes primero
+    this.modelsToTry = [
+      configuredModel || 'gemini-2.5-flash',
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+    ].filter((v, i, a) => a.indexOf(v) === i); // Eliminar duplicados
 
     if (apiKey) {
       this.client = new GoogleGenerativeAI(apiKey);
-      this.logger.log('Gemini provider initialized');
+      this.logger.log(`Gemini provider initialized with models: ${this.modelsToTry.join(', ')}`);
     } else {
       this.logger.warn('Gemini provider not configured - missing API key');
     }
@@ -88,25 +97,38 @@ export class GeminiProvider implements IAIProvider {
       throw new Error('Gemini provider not configured');
     }
 
-    try {
-      const model = this.client.getGenerativeModel({
-        model: this.modelName,
-        systemInstruction: systemPrompt,
-        tools: tools ? this.convertTools(tools) as any : undefined,
-      });
+    let lastError: Error | null = null;
 
-      const chat = model.startChat({
-        history: this.convertMessages(messages.slice(0, -1)),
-      });
+    // Intentar con cada modelo en orden
+    for (const modelName of this.modelsToTry) {
+      try {
+        this.logger.debug(`Trying Gemini model: ${modelName}`);
 
-      const lastMessage = messages[messages.length - 1];
-      const result = await chat.sendMessage(lastMessage.content);
+        const model = this.client.getGenerativeModel({
+          model: modelName,
+          systemInstruction: systemPrompt,
+          tools: tools ? this.convertTools(tools) as any : undefined,
+        });
 
-      return this.parseResponse(result);
-    } catch (error) {
-      this.logger.error('Error calling Gemini API:', error);
-      throw error;
+        const chat = model.startChat({
+          history: this.convertMessages(messages.slice(0, -1)),
+        });
+
+        const lastMessage = messages[messages.length - 1];
+        const result = await chat.sendMessage(lastMessage.content);
+
+        this.logger.log(`Gemini model ${modelName} succeeded`);
+        return this.parseResponse(result);
+      } catch (error) {
+        this.logger.warn(`Gemini model ${modelName} failed: ${error.message}`);
+        lastError = error;
+        // Continuar con el siguiente modelo
+      }
     }
+
+    // Si todos los modelos fallaron
+    this.logger.error('All Gemini models failed:', lastError);
+    throw lastError || new Error('All Gemini models failed');
   }
 
   async continueWithToolResults(
@@ -120,62 +142,70 @@ export class GeminiProvider implements IAIProvider {
       throw new Error('Gemini provider not configured');
     }
 
-    try {
-      const model = this.client.getGenerativeModel({
-        model: this.modelName,
-        systemInstruction: systemPrompt,
-        tools: this.convertTools(tools) as any,
-      });
+    let lastError: Error | null = null;
 
-      // Build conversation history
-      const history = this.convertMessages(messages);
-
-      // Add model's function call response
-      if (previousResponse.toolCalls) {
-        const functionCallParts: Part[] = previousResponse.toolCalls.map(
-          (toolCall) => ({
-            functionCall: {
-              name: toolCall.name,
-              args: toolCall.arguments,
-            },
-          }),
-        );
-        history.push({
-          role: 'model',
-          parts: functionCallParts,
+    // Intentar con cada modelo en orden
+    for (const modelName of this.modelsToTry) {
+      try {
+        const model = this.client.getGenerativeModel({
+          model: modelName,
+          systemInstruction: systemPrompt,
+          tools: this.convertTools(tools) as any,
         });
+
+        // Build conversation history
+        const history = this.convertMessages(messages);
+
+        // Add model's function call response
+        if (previousResponse.toolCalls) {
+          const functionCallParts: Part[] = previousResponse.toolCalls.map(
+            (toolCall) => ({
+              functionCall: {
+                name: toolCall.name,
+                args: toolCall.arguments,
+              },
+            }),
+          );
+          history.push({
+            role: 'model',
+            parts: functionCallParts,
+          });
+        }
+
+        // Add function responses
+        const functionResponseParts: Part[] = toolResults.map((result) => {
+          const toolCall = previousResponse.toolCalls?.find(
+            (tc) => tc.id === result.toolCallId,
+          );
+          return {
+            functionResponse: {
+              name: toolCall?.name || 'unknown',
+              response: { result: result.result },
+            },
+          };
+        });
+
+        history.push({
+          role: 'user',
+          parts: functionResponseParts,
+        });
+
+        const chat = model.startChat({
+          history: history.slice(0, -1),
+        });
+
+        const lastContent = history[history.length - 1];
+        const result = await chat.sendMessage(lastContent.parts);
+
+        return this.parseResponse(result);
+      } catch (error) {
+        this.logger.warn(`Gemini continueWithToolResults ${modelName} failed: ${error.message}`);
+        lastError = error;
       }
-
-      // Add function responses
-      const functionResponseParts: Part[] = toolResults.map((result) => {
-        const toolCall = previousResponse.toolCalls?.find(
-          (tc) => tc.id === result.toolCallId,
-        );
-        return {
-          functionResponse: {
-            name: toolCall?.name || 'unknown',
-            response: { result: result.result },
-          },
-        };
-      });
-
-      history.push({
-        role: 'user',
-        parts: functionResponseParts,
-      });
-
-      const chat = model.startChat({
-        history: history.slice(0, -1),
-      });
-
-      const lastContent = history[history.length - 1];
-      const result = await chat.sendMessage(lastContent.parts);
-
-      return this.parseResponse(result);
-    } catch (error) {
-      this.logger.error('Error continuing Gemini conversation:', error);
-      throw error;
     }
+
+    this.logger.error('All Gemini models failed in continueWithToolResults:', lastError);
+    throw lastError || new Error('All Gemini models failed');
   }
 
   private parseResponse(result: GenerateContentResult): AIResponse {

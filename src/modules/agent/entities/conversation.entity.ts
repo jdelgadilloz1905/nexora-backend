@@ -26,7 +26,7 @@ export class Conversation {
   @JoinColumn({ name: 'userId' })
   user: User;
 
-  @OneToMany(() => Message, (message) => message.conversation, { cascade: true })
+  @OneToMany(() => Message, (message) => message.conversation)
   messages: Message[];
 
   @CreateDateColumn()
