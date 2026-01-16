@@ -195,9 +195,12 @@ export class GeminiProvider implements IAIProvider {
         });
 
         const lastContent = history[history.length - 1];
+        this.logger.debug(`Sending function response to Gemini, parts count: ${lastContent.parts.length}`);
         const result = await chat.sendMessage(lastContent.parts);
 
-        return this.parseResponse(result);
+        const parsed = this.parseResponse(result);
+        this.logger.debug(`Gemini response after tool: content="${parsed.content?.substring(0, 100) || 'EMPTY'}", stopReason=${parsed.stopReason}`);
+        return parsed;
       } catch (error) {
         this.logger.warn(`Gemini continueWithToolResults ${modelName} failed: ${error.message}`);
         lastError = error;
@@ -228,8 +231,20 @@ export class GeminiProvider implements IAIProvider {
     let content = '';
     try {
       content = response.text();
-    } catch {
+    } catch (error) {
       // If there are only function calls, text() might throw
+      this.logger.debug(`Could not get text from response: ${error.message}`);
+
+      // Try to extract text from parts directly
+      const candidates = response.candidates;
+      if (candidates && candidates.length > 0) {
+        const parts = candidates[0].content?.parts || [];
+        for (const part of parts) {
+          if ('text' in part && part.text) {
+            content += part.text;
+          }
+        }
+      }
     }
 
     return {

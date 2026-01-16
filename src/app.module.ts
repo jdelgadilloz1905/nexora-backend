@@ -13,6 +13,7 @@ import { HealthModule } from './modules/health/health.module';
 import { EmailModule } from './modules/email/email.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { UploadModule } from './modules/upload/upload.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { UploadModule } from './modules/upload/upload.module';
     CommunicationsModule,
     CalendarModule,
     AgentModule,
+    IntegrationsModule,
   ],
 })
 export class AppModule {}

@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
 import { TasksModule } from '@/modules/tasks/tasks.module';
+import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 import { Conversation } from './entities/conversation.entity';
 import { Message } from './entities/message.entity';
 import {
@@ -18,6 +19,7 @@ import {
     ConfigModule,
     TypeOrmModule.forFeature([Conversation, Message]),
     TasksModule,
+    IntegrationsModule,
   ],
   controllers: [AgentController],
   providers: [
