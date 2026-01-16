@@ -117,8 +117,16 @@ export class GeminiProvider implements IAIProvider {
         const lastMessage = messages[messages.length - 1];
         const result = await chat.sendMessage(lastMessage.content);
 
+        const parsed = this.parseResponse(result);
+
+        // Si la respuesta está vacía y no hay tool calls, intentar con siguiente modelo
+        if (!parsed.content && !parsed.toolCalls) {
+          this.logger.warn(`Gemini model ${modelName} returned empty response, trying next model...`);
+          continue;
+        }
+
         this.logger.log(`Gemini model ${modelName} succeeded`);
-        return this.parseResponse(result);
+        return parsed;
       } catch (error) {
         this.logger.warn(`Gemini model ${modelName} failed: ${error.message}`);
         lastError = error;
@@ -126,9 +134,10 @@ export class GeminiProvider implements IAIProvider {
       }
     }
 
-    // Si todos los modelos fallaron
-    this.logger.error('All Gemini models failed:', lastError);
-    throw lastError || new Error('All Gemini models failed');
+    // Si todos los modelos fallaron o devolvieron respuestas vacías
+    this.logger.error('All Gemini models failed or returned empty responses');
+    // Devolver respuesta vacía en lugar de lanzar error para que el retry del AgentService funcione
+    return { content: '', stopReason: 'end' };
   }
 
   async continueWithToolResults(
@@ -200,6 +209,13 @@ export class GeminiProvider implements IAIProvider {
 
         const parsed = this.parseResponse(result);
         this.logger.debug(`Gemini response after tool: content="${parsed.content?.substring(0, 100) || 'EMPTY'}", stopReason=${parsed.stopReason}`);
+
+        // Si la respuesta está vacía y no hay más tool calls, intentar con siguiente modelo
+        if (!parsed.content && !parsed.toolCalls) {
+          this.logger.warn(`Gemini model ${modelName} returned empty response after tool, trying next model...`);
+          continue;
+        }
+
         return parsed;
       } catch (error) {
         this.logger.warn(`Gemini continueWithToolResults ${modelName} failed: ${error.message}`);
@@ -207,8 +223,8 @@ export class GeminiProvider implements IAIProvider {
       }
     }
 
-    this.logger.error('All Gemini models failed in continueWithToolResults:', lastError);
-    throw lastError || new Error('All Gemini models failed');
+    this.logger.error('All Gemini models failed in continueWithToolResults');
+    return { content: '', stopReason: 'end' };
   }
 
   private parseResponse(result: GenerateContentResult): AIResponse {
