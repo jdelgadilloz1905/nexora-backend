@@ -79,7 +79,8 @@ export class MemoryService {
   }
 
   /**
-   * Search memories by content (simple text search)
+   * Search memories by content (keyword-based search)
+   * Searches for ANY keyword match, not exact phrase
    */
   async searchMemories(
     userId: string,
@@ -87,13 +88,38 @@ export class MemoryService {
     type?: MemoryType,
     limit: number = 20,
   ): Promise<UserMemory[]> {
+    // Extract meaningful keywords (ignore short words and common terms)
+    const stopWords = ['de', 'la', 'el', 'las', 'los', 'un', 'una', 'que', 'por', 'para', 'con', 'en', 'a', 'y', 'o', 'es', 'mi', 'tu', 'su'];
+    const keywords = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(word => word.length > 2 && !stopWords.includes(word));
+
+    if (keywords.length === 0) {
+      // Fallback to original query if no keywords extracted
+      keywords.push(query.toLowerCase());
+    }
+
+    this.logger.debug(`Searching memories with keywords: ${keywords.join(', ')}`);
+
     const queryBuilder = this.memoryRepository
       .createQueryBuilder('memory')
       .where('memory.userId = :userId', { userId })
-      .andWhere('memory.isActive = :isActive', { isActive: true })
-      .andWhere('LOWER(memory.content) LIKE LOWER(:query)', {
-        query: `%${query}%`,
-      });
+      .andWhere('memory.isActive = :isActive', { isActive: true });
+
+    // Build OR conditions for each keyword
+    const keywordConditions = keywords.map((keyword, index) => {
+      const paramName = `keyword${index}`;
+      return `LOWER(memory.content) LIKE LOWER(:${paramName})`;
+    });
+
+    // Add keyword parameters
+    const keywordParams: Record<string, string> = {};
+    keywords.forEach((keyword, index) => {
+      keywordParams[`keyword${index}`] = `%${keyword}%`;
+    });
+
+    queryBuilder.andWhere(`(${keywordConditions.join(' OR ')})`, keywordParams);
 
     if (type) {
       queryBuilder.andWhere('memory.type = :type', { type });
