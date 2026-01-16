@@ -23,6 +23,8 @@ import {
   AIResponse,
 } from './providers';
 import { ArchiveService } from './services/archive.service';
+import { User } from '@/modules/auth/entities/user.entity';
+import { UserPreferencesDto, Platform } from '@/modules/auth/dto/auth.dto';
 
 // Helper function to format dates in a human-readable format for the AI
 function formatDateTimeForAI(date: Date): string {
@@ -723,6 +725,8 @@ export class AgentService {
     private readonly conversationRepository: Repository<Conversation>,
     @InjectRepository(Message)
     private readonly messageRepository: Repository<Message>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     // FASE 4: Archive Service for history search (injected lazily to avoid circular dependency)
     @Inject(forwardRef(() => ArchiveService))
     private readonly archiveService: ArchiveService,
@@ -744,15 +748,25 @@ export class AgentService {
   }
 
   /**
-   * Generate system prompt with relevant user memories injected
+   * Generate system prompt with relevant user memories and preferences injected
    */
   private async getSystemPromptWithMemory(
     userId: string,
     currentMessage: string,
   ): Promise<string> {
     const basePrompt = getSystemPrompt();
+    let additionalSections = '';
 
     try {
+      // Get user preferences
+      const user = await this.userRepository.findOne({ where: { id: userId } });
+      if (user?.preferences) {
+        const prefsSection = this.formatPreferencesForPrompt(user.preferences as UserPreferencesDto);
+        if (prefsSection) {
+          additionalSections += '\n\n' + prefsSection;
+        }
+      }
+
       // Get relevant memories based on current context
       const memories = await this.memoryService.getRelevantMemories(
         userId,
@@ -760,19 +774,56 @@ export class AgentService {
         10, // Max 10 memories to inject
       );
 
-      if (memories.length === 0) {
-        return basePrompt;
+      if (memories.length > 0) {
+        const memorySection = this.formatMemoriesForPrompt(memories);
+        additionalSections += '\n\n' + memorySection;
       }
 
-      // Format memories for injection
-      const memorySection = this.formatMemoriesForPrompt(memories);
-
-      // Inject memories before the closing of the prompt
-      return basePrompt + '\n\n' + memorySection;
+      return basePrompt + additionalSections;
     } catch (error) {
-      this.logger.warn(`Failed to load memories for prompt: ${error.message}`);
+      this.logger.warn(`Failed to load user context for prompt: ${error.message}`);
       return basePrompt;
     }
+  }
+
+  /**
+   * Format user preferences for inclusion in system prompt
+   */
+  private formatPreferencesForPrompt(preferences: UserPreferencesDto): string {
+    const platformLabels: Record<Platform, string> = {
+      google: 'Google',
+      microsoft: 'Microsoft',
+      notion: 'Notion',
+      nexora: 'Nexora (local)',
+    };
+
+    const lines: string[] = [];
+    lines.push('## PREFERENCIAS DEL USUARIO');
+    lines.push('');
+    lines.push('El usuario ha configurado las siguientes preferencias para dónde crear/guardar cosas:');
+    lines.push('');
+
+    if (preferences.tasks) {
+      lines.push(`- **Tareas**: Crear en ${platformLabels[preferences.tasks.primary]}${preferences.tasks.fallback ? ` (respaldo: ${platformLabels[preferences.tasks.fallback]})` : ''}`);
+    }
+    if (preferences.events) {
+      lines.push(`- **Eventos de calendario**: Crear en ${platformLabels[preferences.events.primary]}${preferences.events.fallback ? ` (respaldo: ${platformLabels[preferences.events.fallback]})` : ''}`);
+    }
+    if (preferences.meetings) {
+      lines.push(`- **Reuniones**: Agendar en ${platformLabels[preferences.meetings.primary]}${preferences.meetings.fallback ? ` (respaldo: ${platformLabels[preferences.meetings.fallback]})` : ''}`);
+    }
+    if (preferences.emails) {
+      lines.push(`- **Correos**: Enviar desde ${platformLabels[preferences.emails.primary]}`);
+    }
+
+    lines.push('');
+    lines.push('**IMPORTANTE - Usa estas preferencias automáticamente:**');
+    lines.push('- Cuando el usuario pida crear una tarea, usa la plataforma configurada para tareas');
+    lines.push('- Si la plataforma preferida no está conectada, usa el respaldo');
+    lines.push('- NO preguntes al usuario dónde quiere guardar algo si ya tiene una preferencia configurada');
+    lines.push('- Si usas el respaldo, informa brevemente al usuario (ej: "Lo guardé en Nexora porque Google no está conectado")');
+
+    return lines.join('\n');
   }
 
   /**

@@ -22,8 +22,25 @@ import {
   ResetPasswordDto,
   UpdateProfileDto,
   ChangePasswordDto,
+  UpdatePreferencesDto,
+  UserPreferencesDto,
+  PreferencesResponseDto,
+  Platform,
 } from './dto/auth.dto';
 import { EmailService } from '@/modules/email/email.service';
+import { GoogleService } from '@/modules/integrations/google.service';
+
+// Default preferences for new users
+const DEFAULT_PREFERENCES: UserPreferencesDto = {
+  tasks: { primary: 'nexora', fallback: 'nexora' },
+  events: { primary: 'google', fallback: 'nexora' },
+  meetings: { primary: 'google', fallback: 'nexora' },
+  emails: { primary: 'google' },
+  notes: { primary: 'nexora' },
+  language: 'es',
+  timezone: 'America/Bogota',
+  enableLearning: true,
+};
 
 @Injectable()
 export class AuthService {
@@ -34,6 +51,7 @@ export class AuthService {
     private readonly tokenRepository: Repository<VerificationToken>,
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
+    private readonly googleService: GoogleService,
   ) {}
 
   async register(dto: RegisterDto): Promise<{ message: string }> {
@@ -196,6 +214,100 @@ export class AuthService {
 
     await this.userRepository.save(user);
     return user;
+  }
+
+  // ============================================
+  // Preferences Management
+  // ============================================
+
+  async getPreferences(userId: string): Promise<PreferencesResponseDto> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    // Get user preferences or defaults
+    const preferences: UserPreferencesDto = {
+      ...DEFAULT_PREFERENCES,
+      ...(user.preferences as UserPreferencesDto),
+    };
+
+    // Check connected platforms
+    const connectedPlatforms = await this.getConnectedPlatforms(userId);
+
+    return {
+      preferences,
+      connectedPlatforms,
+    };
+  }
+
+  async updatePreferences(
+    userId: string,
+    dto: UpdatePreferencesDto,
+  ): Promise<PreferencesResponseDto> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    // Merge with existing preferences
+    const currentPreferences = (user.preferences as UserPreferencesDto) || {};
+    const updatedPreferences: UserPreferencesDto = {
+      ...DEFAULT_PREFERENCES,
+      ...currentPreferences,
+      ...dto,
+    };
+
+    // Validate that selected platforms make sense
+    const connectedPlatforms = await this.getConnectedPlatforms(userId);
+    this.validatePreferences(updatedPreferences, connectedPlatforms);
+
+    // Save updated preferences
+    user.preferences = updatedPreferences as Record<string, unknown>;
+    await this.userRepository.save(user);
+
+    return {
+      preferences: updatedPreferences,
+      connectedPlatforms,
+    };
+  }
+
+  private async getConnectedPlatforms(
+    userId: string,
+  ): Promise<Record<Platform, boolean>> {
+    const googleIntegration = await this.googleService.getIntegration(userId);
+
+    return {
+      google: !!googleIntegration,
+      microsoft: false, // TODO: Add Microsoft integration check
+      notion: false, // TODO: Add Notion integration check
+      nexora: true, // Always available (local storage)
+    };
+  }
+
+  private validatePreferences(
+    preferences: UserPreferencesDto,
+    connectedPlatforms: Record<Platform, boolean>,
+  ): void {
+    // Warn if primary platform is not connected (but don't block)
+    // The agent will handle fallback at runtime
+    const checkPlatformPreference = (
+      actionType: string,
+      pref?: { primary: Platform; fallback?: Platform },
+    ) => {
+      if (pref && pref.primary !== 'nexora' && !connectedPlatforms[pref.primary]) {
+        // Log warning but don't throw - user might connect later
+        console.warn(
+          `User selected ${pref.primary} for ${actionType} but platform is not connected. Will use fallback.`,
+        );
+      }
+    };
+
+    checkPlatformPreference('tasks', preferences.tasks);
+    checkPlatformPreference('events', preferences.events);
+    checkPlatformPreference('meetings', preferences.meetings);
+    checkPlatformPreference('emails', preferences.emails);
+    checkPlatformPreference('notes', preferences.notes);
   }
 
   async changePassword(

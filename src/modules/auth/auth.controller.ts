@@ -4,6 +4,7 @@ import {
   Body,
   Get,
   Patch,
+  Put,
   UseGuards,
   Req,
   Param,
@@ -27,6 +28,8 @@ import {
   ResetPasswordDto,
   UpdateProfileDto,
   ChangePasswordDto,
+  UpdatePreferencesDto,
+  PreferencesResponseDto,
 } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
@@ -98,6 +101,35 @@ export class AuthController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.authService.updateProfile(req.user.userId, dto);
+  }
+
+  // ============================================
+  // Preferences Endpoints
+  // ============================================
+
+  @Get('preferences')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get user preferences and connected platforms' })
+  @ApiResponse({ status: 200, type: PreferencesResponseDto })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getPreferences(
+    @Req() req: { user: { userId: string } },
+  ): Promise<PreferencesResponseDto> {
+    return this.authService.getPreferences(req.user.userId);
+  }
+
+  @Put('preferences')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Update user preferences' })
+  @ApiResponse({ status: 200, type: PreferencesResponseDto })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async updatePreferences(
+    @Req() req: { user: { userId: string } },
+    @Body() dto: UpdatePreferencesDto,
+  ): Promise<PreferencesResponseDto> {
+    return this.authService.updatePreferences(req.user.userId, dto);
   }
 
   @Post('change-password')

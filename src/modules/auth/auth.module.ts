@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -8,6 +8,7 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { User } from './entities/user.entity';
 import { VerificationToken } from './entities/verification-token.entity';
+import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { VerificationToken } from './entities/verification-token.entity';
       }),
       inject: [ConfigService],
     }),
+    forwardRef(() => IntegrationsModule),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

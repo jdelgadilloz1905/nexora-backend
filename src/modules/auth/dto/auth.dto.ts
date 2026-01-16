@@ -131,3 +131,101 @@ export class ChangePasswordDto {
   @MaxLength(50)
   newPassword: string;
 }
+
+// ============================================
+// User Preferences DTOs
+// ============================================
+
+export type Platform = 'google' | 'microsoft' | 'notion' | 'nexora';
+
+export class PlatformPreferenceDto {
+  @ApiProperty({
+    enum: ['google', 'microsoft', 'notion', 'nexora'],
+    example: 'google',
+    description: 'Primary platform for this action type',
+  })
+  @IsString()
+  primary: Platform;
+
+  @ApiPropertyOptional({
+    enum: ['google', 'microsoft', 'notion', 'nexora'],
+    example: 'nexora',
+    description: 'Fallback platform if primary is not available',
+  })
+  @IsOptional()
+  @IsString()
+  fallback?: Platform;
+}
+
+export class UserPreferencesDto {
+  @ApiPropertyOptional({
+    description: 'Preferred platform for creating tasks',
+    type: PlatformPreferenceDto,
+  })
+  @IsOptional()
+  tasks?: PlatformPreferenceDto;
+
+  @ApiPropertyOptional({
+    description: 'Preferred platform for creating calendar events',
+    type: PlatformPreferenceDto,
+  })
+  @IsOptional()
+  events?: PlatformPreferenceDto;
+
+  @ApiPropertyOptional({
+    description: 'Preferred platform for scheduling meetings',
+    type: PlatformPreferenceDto,
+  })
+  @IsOptional()
+  meetings?: PlatformPreferenceDto;
+
+  @ApiPropertyOptional({
+    description: 'Preferred platform for sending emails',
+    type: PlatformPreferenceDto,
+  })
+  @IsOptional()
+  emails?: PlatformPreferenceDto;
+
+  @ApiPropertyOptional({
+    description: 'Preferred platform for storing notes/documents',
+    type: PlatformPreferenceDto,
+  })
+  @IsOptional()
+  notes?: PlatformPreferenceDto;
+
+  @ApiPropertyOptional({
+    example: 'es',
+    description: 'Preferred language (es, en)',
+  })
+  @IsOptional()
+  @IsString()
+  language?: string;
+
+  @ApiPropertyOptional({
+    example: 'America/Bogota',
+    description: 'User timezone',
+  })
+  @IsOptional()
+  @IsString()
+  timezone?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Enable AI learning from user patterns',
+  })
+  @IsOptional()
+  enableLearning?: boolean;
+}
+
+export class UpdatePreferencesDto extends UserPreferencesDto {}
+
+export class PreferencesResponseDto {
+  @ApiProperty({ type: UserPreferencesDto })
+  preferences: UserPreferencesDto;
+
+  @ApiProperty({
+    description: 'Connected integrations status',
+    example: { google: true, microsoft: false, notion: false },
+  })
+  connectedPlatforms: Record<Platform, boolean>;
+}
