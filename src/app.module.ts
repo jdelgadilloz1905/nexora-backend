@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 
 // Modules
 import { AuthModule } from './modules/auth/auth.module';
@@ -48,6 +49,9 @@ import { MemoryModule } from './modules/memory/memory.module';
         limit: 100, // 100 requests per minute
       },
     ]),
+
+    // CRON Jobs (FASE 3)
+    ScheduleModule.forRoot(),
 
     // Feature Modules
     EmailModule,

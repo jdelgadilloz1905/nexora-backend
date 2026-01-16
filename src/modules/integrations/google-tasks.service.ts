@@ -70,22 +70,38 @@ export class GoogleTasksService {
 
     const items = response.data.items || [];
 
-    return items.map((task) => ({
-      id: task.id!,
-      listId,
-      title: task.title || 'Sin título',
-      notes: task.notes || undefined,
-      due: task.due ? new Date(task.due) : undefined,
-      status: task.status as 'needsAction' | 'completed',
-      completed: task.completed ? new Date(task.completed) : undefined,
-      parent: task.parent || undefined,
-      position: task.position || undefined,
-      links: task.links?.map((l) => ({
-        type: l.type || '',
-        description: l.description || '',
-        link: l.link || '',
-      })),
-    }));
+    return items.map((task) => {
+      // Google Tasks sometimes has empty title with content in notes
+      // If title is empty but notes exists, use notes as title
+      let title = task.title?.trim() || '';
+      let notes = task.notes?.trim() || '';
+
+      if (!title && notes) {
+        // Use first line of notes as title if title is empty
+        const firstLine = notes.split('\n')[0];
+        title = firstLine;
+        // Keep remaining lines as notes
+        const remainingLines = notes.split('\n').slice(1).join('\n').trim();
+        notes = remainingLines || '';
+      }
+
+      return {
+        id: task.id!,
+        listId,
+        title: title || 'Sin título',
+        notes: notes || undefined,
+        due: task.due ? new Date(task.due) : undefined,
+        status: task.status as 'needsAction' | 'completed',
+        completed: task.completed ? new Date(task.completed) : undefined,
+        parent: task.parent || undefined,
+        position: task.position || undefined,
+        links: task.links?.map((l) => ({
+          type: l.type || '',
+          description: l.description || '',
+          link: l.link || '',
+        })),
+      };
+    });
   }
 
   async getTask(userId: string, taskId: string, listId: string = '@default'): Promise<Task | null> {

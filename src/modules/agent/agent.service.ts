@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In, MoreThan } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessageDto, AgentResponseDto } from './dto/agent.dto';
 import { TasksService } from '@/modules/tasks/tasks.service';
@@ -22,6 +22,7 @@ import {
   AIMessage,
   AIResponse,
 } from './providers';
+import { ArchiveService } from './services/archive.service';
 
 // Helper function to format dates in a human-readable format for the AI
 function formatDateTimeForAI(date: Date): string {
@@ -148,6 +149,47 @@ function getLocalISODate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// Helper to format Google Tasks due date (date only, no time)
+// Google Tasks API only stores dates, not times
+function formatTaskDueDate(dueDate: Date): string {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  // Google Tasks stores dates in UTC at midnight, so we need to extract just the date
+  // The due date from Google is like "2024-01-16T00:00:00.000Z"
+  // We want to compare the date portion only
+  const dueYear = dueDate.getUTCFullYear();
+  const dueMonth = dueDate.getUTCMonth();
+  const dueDay = dueDate.getUTCDate();
+  const dueLocalDate = new Date(dueYear, dueMonth, dueDay);
+
+  // Compare dates
+  if (dueLocalDate.getTime() === today.getTime()) {
+    return 'Hoy';
+  }
+  if (dueLocalDate.getTime() === tomorrow.getTime()) {
+    return 'Mañana';
+  }
+
+  // Check if it's in the past
+  if (dueLocalDate < today) {
+    const daysDiff = Math.floor((today.getTime() - dueLocalDate.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysDiff === 1) {
+      return 'Ayer (vencida)';
+    }
+    return `Hace ${daysDiff} días (vencida)`;
+  }
+
+  // Future date - show day of week and date
+  return dueLocalDate.toLocaleDateString('es-ES', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+}
+
 // Function to generate system prompt with current date/time
 function getSystemPrompt(): string {
   const now = new Date();
@@ -262,6 +304,20 @@ Nunca dejar NOISE sin resolver por mucho tiempo.
 - Ver archivos compartidos y destacados
 - Consultar espacio de almacenamiento
 
+### ✅ GOOGLE TASKS (Disponible si conectado)
+- Ver tareas pendientes de Google Tasks
+- Crear nuevas tareas con fecha de vencimiento
+- Completar tareas
+- Eliminar tareas
+- Ver diferentes listas de tareas
+
+**IMPORTANTE - Diferencia entre Tareas:**
+- **Tareas de Nexora** (get_tasks, create_task): Son tareas INTERNAS del sistema con prioridades (HIGH, MEDIUM, LOW, NOISE)
+- **Google Tasks** (get_google_tasks, create_google_task): Son tareas de la aplicación Google Tasks del usuario
+
+Cuando el usuario diga "mis tareas del calendario" o "tareas de Google", usar Google Tasks.
+Cuando el usuario diga "mis tareas pendientes" o "qué tengo que hacer", mostrar AMBAS (Nexora + Google Tasks).
+
 ## MANEJO DE EVENTOS DEL CALENDARIO
 
 Cada evento incluye información completa:
@@ -355,6 +411,45 @@ Cada evento incluye información completa:
 - "cuánto espacio tengo en Drive" → get_storage_quota
 - "información del archivo [id]" → get_file_info
 
+### Google Tasks (requiere conexión con Google)
+- get_google_tasks: Ver tareas pendientes de Google Tasks
+- get_google_task_lists: Ver todas las listas de tareas
+- create_google_task: Crear nueva tarea en Google Tasks
+- complete_google_task: Marcar tarea como completada
+- delete_google_task: Eliminar tarea
+
+### Cuándo usar tools de Google Tasks:
+- "mis tareas de Google" → get_google_tasks
+- "tareas del calendario" → get_google_tasks (las tareas aparecen en el calendario de Google)
+- "qué tareas tengo en Google Tasks" → get_google_tasks
+- "crea una tarea en Google" → create_google_task
+- "completa la tarea [título]" en Google Tasks → complete_google_task
+- "elimina la tarea [título]" de Google Tasks → delete_google_task
+- "mis listas de tareas" → get_google_task_lists
+
+### IMPORTANTE - Cuando el usuario pida "sus tareas" o "qué tiene que hacer":
+1. Primero usa get_tasks para obtener tareas de Nexora (con prioridades)
+2. Luego usa get_google_tasks para obtener tareas de Google Tasks
+3. Muestra AMBAS en la respuesta, claramente diferenciadas:
+   - **Tareas de Nexora** (con prioridades 🔴🟡🟢🟣)
+   - **Google Tasks** (tareas del calendario)
+
+### Histórico de Conversaciones (FASE 4)
+- search_history: Buscar en conversaciones archivadas (más de 7 días)
+
+### Cuándo usar search_history:
+- "¿Qué hablamos del presupuesto hace 2 meses?" → search_history con query "presupuesto"
+- "El cliente que mencioné en enero" → search_history con query "cliente" y dateFrom/dateTo
+- "¿Cuándo fue la última vez que hablamos de X?" → search_history con query "X"
+- "¿Te acuerdas del proyecto Alpha?" → search_history con query "proyecto Alpha"
+- Si el usuario menciona algo que NO está en el contexto reciente (últimos 7 días) → search_history
+- Si el usuario usa palabras como "hace tiempo", "hace meses", "el año pasado" → search_history
+
+### Cuándo NO usar search_history:
+- Conversaciones recientes (últimos 7 días) - ya están en el contexto
+- Información que está en Memory (contactos, preferencias) - usar recall
+- Si el usuario NO menciona algo del pasado
+
 ### Cuándo usar reply_email:
 - "responde al correo de [persona]" → reply_email con searchFrom: "[persona]"
 - "responde diciendo que..." → reply_email con el body correspondiente
@@ -363,20 +458,54 @@ Cada evento incluye información completa:
 
 SIEMPRE que vayas a enviar o responder un correo:
 1. Primero usa send_email o reply_email con confirmed=false (default)
-2. Muestra el PREVIEW al usuario de forma clara
+2. Muestra el PREVIEW al usuario de forma clara y profesional
 3. Pregunta "¿Lo envío?"
 4. Si el usuario confirma ("sí", "dale", "envíalo"), usa el mismo tool con confirmed=true
 5. Si el usuario quiere cambios, ajusta y muestra nuevo preview
 
-Formato del preview:
----
+Formato del preview (IMPORTANTE: usa líneas en blanco para separar secciones):
+
 📧 **Preview del correo:**
+
 **Para:** destinatario@email.com
 **Asunto:** El asunto aquí
-**Mensaje:**
-El contenido del correo...
+
 ---
+
+El contenido del correo aquí...
+
+Con párrafos bien separados...
+
+Saludos,
+[Nombre]
+
+---
+
 ¿Lo envío o quieres que modifique algo?
+
+## FORMATO DE RESPUESTAS PROFESIONALES
+
+Como asistente ejecutivo profesional, tus respuestas deben ser claras y bien estructuradas:
+
+### Reglas de formato:
+1. **Usa líneas en blanco** entre secciones para mejorar legibilidad
+2. **Usa negritas** para destacar información importante (no asteriscos literales)
+3. **Usa listas** con guiones o números cuando presentes múltiples items
+4. **Usa separadores** (---) para delimitar contenido como previews de correo
+5. **Agrupa información relacionada** en párrafos coherentes
+
+### Para correos, siempre muestra:
+- Para: en una línea
+- Asunto: en otra línea
+- (línea en blanco)
+- Contenido del mensaje con párrafos separados
+- Firma al final
+
+### NO hacer:
+- NO juntes todo en un párrafo largo
+- NO omitas líneas en blanco entre secciones
+- NO uses asteriscos literales (usa **negrita** que se renderiza)
+- NO mezcles diferentes tipos de información sin separación
 
 ## BRIEFING DIARIO
 
@@ -594,6 +723,9 @@ export class AgentService {
     private readonly conversationRepository: Repository<Conversation>,
     @InjectRepository(Message)
     private readonly messageRepository: Repository<Message>,
+    // FASE 4: Archive Service for history search (injected lazily to avoid circular dependency)
+    @Inject(forwardRef(() => ArchiveService))
+    private readonly archiveService: ArchiveService,
   ) {}
 
   // Enrich calendar events with real task descriptions when they're Google Tasks
@@ -1231,6 +1363,96 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
           required: [],
         },
       },
+      // Google Tasks Tools
+      {
+        name: 'get_google_tasks',
+        description: 'Obtiene las tareas de Google Tasks del usuario. Incluye tareas con fecha de vencimiento y su estado.',
+        parameters: {
+          type: 'object',
+          properties: {
+            listId: {
+              type: 'string',
+              description: 'ID de la lista de tareas (opcional, por defecto usa la lista principal "@default")',
+            },
+            showCompleted: {
+              type: 'boolean',
+              description: 'Si mostrar tareas completadas (default: false)',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'get_google_task_lists',
+        description: 'Obtiene todas las listas de tareas de Google Tasks del usuario.',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: [],
+        },
+      },
+      {
+        name: 'create_google_task',
+        description: 'Crea una nueva tarea en Google Tasks.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: {
+              type: 'string',
+              description: 'Título de la tarea',
+            },
+            notes: {
+              type: 'string',
+              description: 'Notas o descripción de la tarea (opcional)',
+            },
+            due: {
+              type: 'string',
+              description: 'Fecha de vencimiento en formato ISO (YYYY-MM-DD o YYYY-MM-DDTHH:mm:ss)',
+            },
+            listId: {
+              type: 'string',
+              description: 'ID de la lista donde crear la tarea (opcional, por defecto "@default")',
+            },
+          },
+          required: ['title'],
+        },
+      },
+      {
+        name: 'complete_google_task',
+        description: 'Marca una tarea de Google Tasks como completada.',
+        parameters: {
+          type: 'object',
+          properties: {
+            taskId: {
+              type: 'string',
+              description: 'ID de la tarea a completar',
+            },
+            listId: {
+              type: 'string',
+              description: 'ID de la lista (opcional, por defecto "@default")',
+            },
+          },
+          required: ['taskId'],
+        },
+      },
+      {
+        name: 'delete_google_task',
+        description: 'Elimina una tarea de Google Tasks.',
+        parameters: {
+          type: 'object',
+          properties: {
+            taskId: {
+              type: 'string',
+              description: 'ID de la tarea a eliminar',
+            },
+            listId: {
+              type: 'string',
+              description: 'ID de la lista (opcional, por defecto "@default")',
+            },
+          },
+          required: ['taskId'],
+        },
+      },
       // Memory Tools
       {
         name: 'remember',
@@ -1313,6 +1535,29 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
             },
           },
           required: [],
+        },
+      },
+      // FASE 4: History Search Tool
+      {
+        name: 'search_history',
+        description: 'Busca en el histórico de conversaciones archivadas del usuario. Útil cuando el usuario pregunta por algo que pasó hace tiempo, presupuestos antiguos, acuerdos pasados, o conversaciones de hace semanas/meses. NO usar para conversaciones recientes (últimos 7 días).',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Términos de búsqueda (ej: "presupuesto cliente ABC", "reunión marzo", "proyecto Alpha")',
+            },
+            dateFrom: {
+              type: 'string',
+              description: 'Fecha desde en formato YYYY-MM-DD (opcional)',
+            },
+            dateTo: {
+              type: 'string',
+              description: 'Fecha hasta en formato YYYY-MM-DD (opcional)',
+            },
+          },
+          required: ['query'],
         },
       },
     ];
@@ -2206,6 +2451,120 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
         }
       }
 
+      // Google Tasks Tools
+      case 'get_google_tasks': {
+        try {
+          const listId = (toolInput.listId as string) || '@default';
+          const showCompleted = (toolInput.showCompleted as boolean) || false;
+
+          const tasks = await this.googleTasksService.getTasks(userId, listId, showCompleted);
+
+          if (tasks.length === 0) {
+            return JSON.stringify({
+              message: 'No tienes tareas pendientes en Google Tasks.',
+              tareas: [],
+            });
+          }
+
+          // Format tasks with proper date handling (Google Tasks only stores dates, not times)
+          const formattedTasks = tasks.map(task => ({
+            id: task.id,
+            titulo: task.title,
+            notas: task.notes || null,
+            vencimiento: task.due ? formatTaskDueDate(task.due) : 'Sin fecha',
+            estado: task.status === 'completed' ? 'completada' : 'pendiente',
+          }));
+
+          return JSON.stringify({
+            total: tasks.length,
+            tareas: formattedTasks,
+          });
+        } catch (error) {
+          this.logger.error(`Failed to get Google Tasks: ${error.message}`);
+          return JSON.stringify({ error: 'Google Tasks no conectado o sin permisos.' });
+        }
+      }
+
+      case 'get_google_task_lists': {
+        try {
+          const lists = await this.googleTasksService.getTaskLists(userId);
+
+          return JSON.stringify({
+            total: lists.length,
+            listas: lists.map(list => ({
+              id: list.id,
+              nombre: list.title,
+            })),
+          });
+        } catch (error) {
+          this.logger.error(`Failed to get task lists: ${error.message}`);
+          return JSON.stringify({ error: 'Google Tasks no conectado o sin permisos.' });
+        }
+      }
+
+      case 'create_google_task': {
+        try {
+          const title = toolInput.title as string;
+          const notes = toolInput.notes as string | undefined;
+          const due = toolInput.due ? new Date(toolInput.due as string) : undefined;
+          const listId = (toolInput.listId as string) || undefined;
+
+          const task = await this.googleTasksService.createTask(userId, {
+            title,
+            notes,
+            due,
+            listId,
+          });
+
+          return JSON.stringify({
+            success: true,
+            message: `Tarea "${title}" creada en Google Tasks`,
+            tarea: {
+              id: task.id,
+              titulo: task.title,
+              vencimiento: task.due ? formatDateTimeForAI(task.due) : 'Sin fecha',
+            },
+          });
+        } catch (error) {
+          this.logger.error(`Failed to create Google Task: ${error.message}`);
+          return JSON.stringify({ error: 'No se pudo crear la tarea en Google Tasks.' });
+        }
+      }
+
+      case 'complete_google_task': {
+        try {
+          const taskId = toolInput.taskId as string;
+          const listId = (toolInput.listId as string) || '@default';
+
+          const task = await this.googleTasksService.completeTask(userId, taskId, listId);
+
+          return JSON.stringify({
+            success: true,
+            message: `Tarea "${task.title}" marcada como completada`,
+          });
+        } catch (error) {
+          this.logger.error(`Failed to complete Google Task: ${error.message}`);
+          return JSON.stringify({ error: 'No se pudo completar la tarea.' });
+        }
+      }
+
+      case 'delete_google_task': {
+        try {
+          const taskId = toolInput.taskId as string;
+          const listId = (toolInput.listId as string) || '@default';
+
+          await this.googleTasksService.deleteTask(userId, taskId, listId);
+
+          return JSON.stringify({
+            success: true,
+            message: 'Tarea eliminada de Google Tasks',
+          });
+        } catch (error) {
+          this.logger.error(`Failed to delete Google Task: ${error.message}`);
+          return JSON.stringify({ error: 'No se pudo eliminar la tarea.' });
+        }
+      }
+
       // Memory Tools
       case 'remember': {
         try {
@@ -2363,6 +2722,49 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
         }
       }
 
+      // FASE 4: History Search Tool
+      case 'search_history': {
+        try {
+          const query = toolInput.query as string;
+          const dateFrom = toolInput.dateFrom as string | undefined;
+          const dateTo = toolInput.dateTo as string | undefined;
+
+          this.logger.log(`Searching history for user ${userId}: "${query}"`);
+
+          const results = await this.archiveService.searchHistory(userId, query, {
+            dateFrom,
+            dateTo,
+            limit: 5,
+          });
+
+          if (results.length === 0) {
+            return JSON.stringify({
+              found: false,
+              message: `No encontré nada relacionado con "${query}" en tu historial de conversaciones.`,
+              suggestion: 'Prueba con otros términos de búsqueda o verifica las fechas.',
+            });
+          }
+
+          return JSON.stringify({
+            found: true,
+            resultCount: results.length,
+            results: results.map(r => ({
+              period: `${r.periodStart.toLocaleDateString('es-ES')} - ${r.periodEnd.toLocaleDateString('es-ES')}`,
+              summary: r.summary,
+              topics: r.topics,
+              messageCount: r.messageCount,
+              relevantSnippets: r.relevantSnippets,
+            })),
+          });
+        } catch (error) {
+          this.logger.error(`Failed to search history: ${error.message}`);
+          return JSON.stringify({
+            error: 'Error al buscar en el historial.',
+            message: 'Hubo un problema al buscar en tus conversaciones archivadas.',
+          });
+        }
+      }
+
       default:
         return JSON.stringify({ error: 'Herramienta no reconocida' });
     }
@@ -2380,19 +2782,19 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
   }
 
   async chat(userId: string, dto: ChatMessageDto): Promise<AgentResponseDto> {
-    // Get or create conversation
-    let conversation: Conversation | null = null;
-    if (dto.conversationId) {
-      conversation = await this.conversationRepository.findOne({
-        where: { id: dto.conversationId, userId },
-        relations: ['messages'],
-      });
-    }
+    // FASE 1: Single conversation per user - always use primary conversation
+    let conversation = await this.conversationRepository.findOne({
+      where: { userId, isPrimary: true },
+      relations: ['messages'],
+    });
 
+    // If no primary conversation exists, create one
     if (!conversation) {
+      this.logger.log(`Creating primary conversation for user ${userId}`);
       conversation = this.conversationRepository.create({
-        id: dto.conversationId || uuidv4(),
+        id: uuidv4(),
         userId,
+        isPrimary: true, // Mark as primary conversation
       });
       await this.conversationRepository.save(conversation);
     }
@@ -2514,11 +2916,28 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
   }
 
   private async buildMessageHistory(conversationId: string): Promise<AIMessage[]> {
+    // FASE 2: Get non-archived messages, limited to last 50 within 7 days
+    const MAX_MESSAGES = 50;
+    const MAX_DAYS = 7;
+
+    // Calculate the date 7 days ago
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - MAX_DAYS);
+
     const messages = await this.messageRepository.find({
-      where: { conversationId },
-      order: { createdAt: 'ASC' },
-      take: 20, // Limit history to last 20 messages
+      where: {
+        conversationId,
+        archived: false, // Only non-archived messages
+        createdAt: MoreThan(sevenDaysAgo), // Only messages from last 7 days
+      },
+      order: { createdAt: 'DESC' }, // Get most recent first
+      take: MAX_MESSAGES,
     });
+
+    // Reverse to get chronological order (oldest first)
+    messages.reverse();
+
+    this.logger.debug(`Built message history: ${messages.length} messages (max ${MAX_MESSAGES}, last ${MAX_DAYS} days)`);
 
     return messages.map((msg) => ({
       role: msg.role as 'user' | 'assistant',
@@ -2645,24 +3064,101 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
     };
   }
 
+  // FASE 1: Returns only the primary conversation (single conversation per user)
   async getConversations(userId: string): Promise<Conversation[]> {
-    return this.conversationRepository.find({
-      where: { userId },
+    const primaryConversation = await this.conversationRepository.findOne({
+      where: { userId, isPrimary: true },
       order: { updatedAt: 'DESC' },
-      take: 20,
     });
+
+    // Return array with single primary conversation (or empty if none exists)
+    return primaryConversation ? [primaryConversation] : [];
   }
 
-  async getConversation(userId: string, conversationId: string): Promise<Conversation | null> {
+  // FASE 1: Get the primary conversation for a user
+  async getPrimaryConversation(userId: string): Promise<Conversation | null> {
     return this.conversationRepository.findOne({
-      where: { id: conversationId, userId },
+      where: { userId, isPrimary: true },
       relations: ['messages'],
       order: { messages: { createdAt: 'ASC' } },
     });
   }
 
+  async getConversation(userId: string, conversationId: string): Promise<Conversation | null> {
+    // FASE 1: If requesting any conversation, return the primary one
+    return this.getPrimaryConversation(userId);
+  }
+
+  // FASE 1: Disable conversation deletion (primary conversation cannot be deleted)
   async deleteConversation(userId: string, conversationId: string): Promise<void> {
-    await this.conversationRepository.delete({ id: conversationId, userId });
+    // Don't allow deleting the primary conversation
+    const conversation = await this.conversationRepository.findOne({
+      where: { id: conversationId, userId },
+    });
+
+    if (conversation?.isPrimary) {
+      this.logger.warn(`Attempted to delete primary conversation for user ${userId}`);
+      throw new Error('No se puede eliminar la conversación principal');
+    }
+
+    // Only delete non-primary conversations (legacy cleanup)
+    await this.conversationRepository.delete({ id: conversationId, userId, isPrimary: false });
+  }
+
+  /**
+   * FASE 1: Migrate existing user to single conversation model
+   * This method should be called once to migrate existing users
+   * It finds the most recent conversation and marks it as primary,
+   * then merges all messages into it
+   */
+  async migrateUserToPrimaryConversation(userId: string): Promise<{ migrated: boolean; conversationId?: string }> {
+    // Check if user already has a primary conversation
+    const existingPrimary = await this.conversationRepository.findOne({
+      where: { userId, isPrimary: true },
+    });
+
+    if (existingPrimary) {
+      this.logger.log(`User ${userId} already has primary conversation ${existingPrimary.id}`);
+      return { migrated: false, conversationId: existingPrimary.id };
+    }
+
+    // Get all user's conversations ordered by most recent update
+    const conversations = await this.conversationRepository.find({
+      where: { userId },
+      order: { updatedAt: 'DESC' },
+    });
+
+    if (conversations.length === 0) {
+      this.logger.log(`User ${userId} has no conversations to migrate`);
+      return { migrated: false };
+    }
+
+    // Mark the most recent conversation as primary
+    const primaryConversation = conversations[0];
+    await this.conversationRepository.update(
+      { id: primaryConversation.id },
+      { isPrimary: true }
+    );
+
+    this.logger.log(`Migrated user ${userId}: set conversation ${primaryConversation.id} as primary`);
+
+    // If user has multiple conversations, merge messages into the primary one
+    if (conversations.length > 1) {
+      const otherConversationIds = conversations.slice(1).map(c => c.id);
+
+      // Move all messages from other conversations to primary
+      await this.messageRepository.update(
+        { conversationId: In(otherConversationIds) },
+        { conversationId: primaryConversation.id }
+      );
+
+      // Delete other conversations
+      await this.conversationRepository.delete({ id: In(otherConversationIds) });
+
+      this.logger.log(`Merged ${conversations.length - 1} conversations into primary for user ${userId}`);
+    }
+
+    return { migrated: true, conversationId: primaryConversation.id };
   }
 
   /**

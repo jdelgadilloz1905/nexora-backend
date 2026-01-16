@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Conversation } from './conversation.entity';
 
@@ -33,6 +34,15 @@ export class Message {
   @JoinColumn({ name: 'conversationId' })
   conversation: Conversation;
 
+  // FASE 3: Archiving system
+  @Column({ default: false })
+  @Index('idx_messages_archived')
+  archived: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  archivedAt: Date;
+
   @CreateDateColumn()
+  @Index('idx_messages_created_at')
   createdAt: Date;
 }
