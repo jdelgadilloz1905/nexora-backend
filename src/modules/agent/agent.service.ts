@@ -8,6 +8,8 @@ import { GoogleCalendarService, CalendarEvent } from '@/modules/integrations/goo
 import { GoogleGmailService } from '@/modules/integrations/google-gmail.service';
 import { GoogleService } from '@/modules/integrations/google.service';
 import { GoogleTasksService } from '@/modules/integrations/google-tasks.service';
+import { MemoryService } from '@/modules/memory/memory.service';
+import { MemoryType } from '@/modules/memory/entities/user-memory.entity';
 import { Conversation } from './entities/conversation.entity';
 import { Message, MessageRole } from './entities/message.entity';
 import { Priority } from '@/common/constants/priorities';
@@ -330,14 +332,24 @@ Reglas del briefing:
 - Si hay conflictos de horario, mencionarlos
 - Si no hay Google conectado, omitir secciones de reuniones y correos
 
-## APRENDIZAJE Y CONTEXTO
+## SISTEMA DE MEMORIA
 
-Nexora aprende y recuerda:
-- Contactos frecuentes: Sabe quién es "Pedro" sin apellido
-- Proyectos activos: Reconoce "el presupuesto" o "el contrato"
-- Preferencias: Horarios preferidos, estilo de comunicación
-- Patrones: Reuniones recurrentes, tareas típicas
-- Contexto de negocio: Clientes, proyectos, prioridades
+Nexora tiene memoria persistente. Usa las herramientas de memoria para:
+- **remember**: Guardar información importante que el usuario comparta (contactos, preferencias, proyectos, instrucciones)
+- **recall**: Buscar información guardada cuando necesites contexto
+- **get_memories**: Ver todas las memorias del usuario
+- **forget**: Eliminar información cuando el usuario lo pida
+
+### Cuándo usar remember:
+- Cuando el usuario mencione un contacto con datos: "Juan es el CEO de TechCorp, su email es juan@tech.com"
+- Cuando exprese una preferencia: "Prefiero las reuniones por la mañana"
+- Cuando dé una instrucción: "Cuando escriba a clientes, usa tono formal"
+- Cuando mencione proyectos: "El proyecto Alpha tiene deadline el 15 de marzo"
+
+### Cuándo usar recall:
+- Antes de enviar un correo, para verificar si hay instrucciones de comunicación
+- Cuando el usuario mencione un nombre sin contexto: busca si lo conoces
+- Para personalizar respuestas con contexto del usuario
 
 ## REGLAS DE CONVERSACIÓN
 
@@ -363,6 +375,21 @@ Calendario:
 "Mueve la reunión..." / "Cambia la hora de..." → Actualizar evento
 "Cancela la reunión..." / "Ya no voy a..." → Eliminar evento
 "¿Estoy libre?" / "¿Tengo tiempo?" → Verificar disponibilidad
+
+Email:
+"¿Qué correos tengo?" / "Mis emails" / "Bandeja de entrada" → Ver correos
+"¿Correos sin leer?" / "¿Algo nuevo?" → Ver correos no leídos
+"Lee el correo de..." / "¿Qué dice el email de...?" → Leer contenido completo
+"Envía un correo a..." / "Escribe a..." → Enviar email
+"Responde a..." / "Contesta el correo de..." → Responder en hilo
+"Archiva el correo..." → Archivar email
+"Busca correos de..." / "Emails sobre..." → Buscar en Gmail
+
+Memoria:
+"Recuerda que..." / "Guarda que..." → Guardar en memoria
+"¿Qué sabes de...?" / "¿Conoces a...?" → Buscar en memoria
+"Olvida..." / "Ya no necesito que recuerdes..." → Eliminar de memoria
+"¿Qué has aprendido de mí?" → Mostrar memorias
 
 ### Edición inteligente de eventos
 Las herramientas update_calendar_event y delete_calendar_event son INTELIGENTES:
@@ -483,6 +510,7 @@ export class AgentService {
     private readonly calendarService: GoogleCalendarService,
     private readonly gmailService: GoogleGmailService,
     private readonly googleTasksService: GoogleTasksService,
+    private readonly memoryService: MemoryService,
     @InjectRepository(Conversation)
     private readonly conversationRepository: Repository<Conversation>,
     @InjectRepository(Message)
@@ -502,6 +530,83 @@ export class AgentService {
       realDescription: event.description,
       isGoogleTask: false,
     }));
+  }
+
+  /**
+   * Generate system prompt with relevant user memories injected
+   */
+  private async getSystemPromptWithMemory(
+    userId: string,
+    currentMessage: string,
+  ): Promise<string> {
+    const basePrompt = getSystemPrompt();
+
+    try {
+      // Get relevant memories based on current context
+      const memories = await this.memoryService.getRelevantMemories(
+        userId,
+        currentMessage,
+        10, // Max 10 memories to inject
+      );
+
+      if (memories.length === 0) {
+        return basePrompt;
+      }
+
+      // Format memories for injection
+      const memorySection = this.formatMemoriesForPrompt(memories);
+
+      // Inject memories before the closing of the prompt
+      return basePrompt + '\n\n' + memorySection;
+    } catch (error) {
+      this.logger.warn(`Failed to load memories for prompt: ${error.message}`);
+      return basePrompt;
+    }
+  }
+
+  /**
+   * Format memories for inclusion in system prompt
+   */
+  private formatMemoriesForPrompt(memories: any[]): string {
+    if (memories.length === 0) return '';
+
+    // Group memories by type
+    const grouped: Record<string, string[]> = {};
+    for (const m of memories) {
+      const type = m.type as string;
+      if (!grouped[type]) grouped[type] = [];
+      grouped[type].push(m.content);
+    }
+
+    const typeLabels: Record<string, string> = {
+      preference: 'Preferencias',
+      contact: 'Contactos conocidos',
+      project: 'Proyectos activos',
+      personal: 'Información personal',
+      instruction: 'Instrucciones específicas',
+      relationship: 'Relaciones',
+      pattern: 'Patrones observados',
+      decision: 'Decisiones previas',
+    };
+
+    let section = `## MEMORIA DEL USUARIO
+
+Lo que sabes sobre este usuario (usa esta información para personalizar tus respuestas):
+
+`;
+
+    for (const [type, items] of Object.entries(grouped)) {
+      const label = typeLabels[type] || type;
+      section += `### ${label}\n`;
+      for (const item of items) {
+        section += `- ${item}\n`;
+      }
+      section += '\n';
+    }
+
+    section += `IMPORTANTE: Usa esta información de forma natural. No menciones explícitamente "según mi memoria" o "recuerdo que...", simplemente aplica el conocimiento.`;
+
+    return section;
   }
 
   private getTools(): AITool[] {
@@ -818,6 +923,56 @@ export class AgentService {
         },
       },
       {
+        name: 'read_email',
+        description: 'Lee el contenido completo de un correo específico.',
+        parameters: {
+          type: 'object',
+          properties: {
+            messageId: {
+              type: 'string',
+              description: 'ID del correo a leer',
+            },
+          },
+          required: ['messageId'],
+        },
+      },
+      {
+        name: 'reply_email',
+        description: 'Responde a un correo existente manteniendo el hilo de conversación.',
+        parameters: {
+          type: 'object',
+          properties: {
+            messageId: {
+              type: 'string',
+              description: 'ID del correo original al que responder',
+            },
+            body: {
+              type: 'string',
+              description: 'Contenido de la respuesta',
+            },
+            replyAll: {
+              type: 'boolean',
+              description: 'Responder a todos los destinatarios (default: false)',
+            },
+          },
+          required: ['messageId', 'body'],
+        },
+      },
+      {
+        name: 'archive_email',
+        description: 'Archiva un correo (lo quita de la bandeja de entrada).',
+        parameters: {
+          type: 'object',
+          properties: {
+            messageId: {
+              type: 'string',
+              description: 'ID del correo a archivar',
+            },
+          },
+          required: ['messageId'],
+        },
+      },
+      {
         name: 'mark_email_read',
         description: 'Marca un correo como leído.',
         parameters: {
@@ -829,6 +984,99 @@ export class AgentService {
             },
           },
           required: ['messageId'],
+        },
+      },
+      {
+        name: 'get_unread_count',
+        description: 'Obtiene el número de correos sin leer en la bandeja de entrada.',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: [],
+        },
+      },
+      // Memory Tools
+      {
+        name: 'remember',
+        description: 'Guarda información importante sobre el usuario para recordar en el futuro. Usa esto cuando el usuario comparta preferencias, información de contactos, proyectos, instrucciones específicas, o cualquier dato relevante que deba recordarse.',
+        parameters: {
+          type: 'object',
+          properties: {
+            type: {
+              type: 'string',
+              enum: ['preference', 'contact', 'project', 'personal', 'instruction', 'relationship', 'pattern', 'decision'],
+              description: 'Tipo de información: preference (preferencias), contact (info de contactos), project (proyectos), personal (datos personales), instruction (instrucciones específicas), relationship (relaciones entre personas), pattern (patrones de comportamiento), decision (decisiones tomadas)',
+            },
+            content: {
+              type: 'string',
+              description: 'La información a recordar en lenguaje natural claro y conciso',
+            },
+            importance: {
+              type: 'number',
+              description: 'Importancia del 1-10 (default: 5). Usar 8-10 para información crítica.',
+            },
+            metadata: {
+              type: 'object',
+              description: 'Metadatos adicionales según el tipo: para contactos (email, company, role), para proyectos (projectName, deadline), para preferencias (category: meetings/communication/schedule/work_style)',
+            },
+          },
+          required: ['type', 'content'],
+        },
+      },
+      {
+        name: 'recall',
+        description: 'Busca en la memoria información relevante sobre un tema, persona, proyecto o preferencia. Útil para personalizar respuestas y recordar contexto.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Qué buscar en la memoria (nombre, tema, palabra clave)',
+            },
+            type: {
+              type: 'string',
+              enum: ['preference', 'contact', 'project', 'personal', 'instruction', 'relationship', 'pattern', 'decision', 'all'],
+              description: 'Filtrar por tipo de memoria (default: all)',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'forget',
+        description: 'Elimina una memoria cuando el usuario lo solicite explícitamente. Solo usar cuando el usuario pida olvidar algo específico.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Descripción de qué olvidar - busca y elimina memorias que coincidan',
+            },
+            memoryId: {
+              type: 'string',
+              description: 'ID específico de la memoria a eliminar (si se conoce)',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'get_memories',
+        description: 'Obtiene todas las memorias del usuario, opcionalmente filtradas por tipo. Útil para mostrar al usuario qué información tiene guardada Nexora.',
+        parameters: {
+          type: 'object',
+          properties: {
+            type: {
+              type: 'string',
+              enum: ['preference', 'contact', 'project', 'personal', 'instruction', 'relationship', 'pattern', 'decision'],
+              description: 'Filtrar por tipo de memoria (opcional)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Número máximo de memorias a retornar (default: 20)',
+            },
+          },
+          required: [],
         },
       },
     ];
@@ -1267,12 +1515,234 @@ export class AgentService {
         }
       }
 
+      case 'read_email': {
+        try {
+          const messageId = toolInput.messageId as string;
+          const email = await this.gmailService.getEmailDetail(userId, messageId);
+          return JSON.stringify({
+            id: email.id,
+            from: email.from,
+            to: email.to,
+            subject: email.subject,
+            body: email.body,
+            fecha: formatDateTimeForAI(email.date),
+            isRead: email.isRead,
+            isStarred: email.isStarred,
+          });
+        } catch (error) {
+          this.logger.error(`Failed to read email: ${error.message}`);
+          return JSON.stringify({ error: 'No se pudo leer el correo. Google no conectado o correo no encontrado.' });
+        }
+      }
+
+      case 'reply_email': {
+        try {
+          const messageId = toolInput.messageId as string;
+          const body = toolInput.body as string;
+          const replyAll = (toolInput.replyAll as boolean) || false;
+
+          const result = await this.gmailService.replyToEmail(userId, messageId, body, replyAll);
+
+          return JSON.stringify({
+            success: true,
+            message: 'Respuesta enviada correctamente',
+            messageId: result.id,
+            threadId: result.threadId,
+          });
+        } catch (error) {
+          this.logger.error(`Failed to reply email: ${error.message}`);
+          return JSON.stringify({ error: 'No se pudo enviar la respuesta. Google no conectado o correo no encontrado.' });
+        }
+      }
+
+      case 'archive_email': {
+        try {
+          const messageId = toolInput.messageId as string;
+          await this.gmailService.archiveEmail(userId, messageId);
+          return JSON.stringify({ success: true, message: 'Correo archivado correctamente' });
+        } catch (error) {
+          this.logger.error(`Failed to archive email: ${error.message}`);
+          return JSON.stringify({ error: 'No se pudo archivar el correo.' });
+        }
+      }
+
       case 'mark_email_read': {
         try {
           await this.gmailService.markAsRead(userId, toolInput.messageId as string);
           return JSON.stringify({ success: true, message: 'Correo marcado como leído' });
         } catch (error) {
           return JSON.stringify({ error: 'Google no conectado o correo no encontrado.' });
+        }
+      }
+
+      case 'get_unread_count': {
+        try {
+          const count = await this.gmailService.getUnreadCount(userId);
+          return JSON.stringify({
+            count,
+            message: count === 0
+              ? 'No tienes correos sin leer'
+              : `Tienes ${count} correo${count === 1 ? '' : 's'} sin leer`
+          });
+        } catch (error) {
+          return JSON.stringify({ error: 'Google no conectado.' });
+        }
+      }
+
+      // Memory Tools
+      case 'remember': {
+        try {
+          const memoryType = toolInput.type as string;
+          const content = toolInput.content as string;
+          const importance = (toolInput.importance as number) || 5;
+          const metadata = toolInput.metadata as Record<string, unknown> || {};
+
+          // Validate memory type
+          const validTypes = ['preference', 'contact', 'project', 'personal', 'instruction', 'relationship', 'pattern', 'decision'];
+          if (!validTypes.includes(memoryType)) {
+            return JSON.stringify({ error: `Tipo de memoria inválido. Usar: ${validTypes.join(', ')}` });
+          }
+
+          const memory = await this.memoryService.createMemory(userId, {
+            type: memoryType as MemoryType,
+            content,
+            importance,
+            metadata: {
+              ...metadata,
+              source: 'explicit',
+            },
+          });
+
+          this.logger.log(`Memory created: ${memory.id} (${memoryType})`);
+
+          return JSON.stringify({
+            success: true,
+            message: 'Información guardada en memoria',
+            memory: {
+              id: memory.id,
+              type: memory.type,
+              content: memory.content,
+              importance: memory.importance,
+            },
+          });
+        } catch (error) {
+          this.logger.error(`Failed to save memory: ${error.message}`);
+          return JSON.stringify({ error: 'No se pudo guardar la información en memoria.' });
+        }
+      }
+
+      case 'recall': {
+        try {
+          const query = toolInput.query as string;
+          const type = toolInput.type as string | undefined;
+
+          let memories;
+          if (type && type !== 'all') {
+            memories = await this.memoryService.searchMemories(userId, query, type as MemoryType, 10);
+          } else {
+            memories = await this.memoryService.searchMemories(userId, query, undefined, 10);
+          }
+
+          if (memories.length === 0) {
+            return JSON.stringify({
+              found: false,
+              message: `No encontré información sobre "${query}" en mi memoria.`,
+            });
+          }
+
+          return JSON.stringify({
+            found: true,
+            count: memories.length,
+            memories: memories.map(m => ({
+              id: m.id,
+              type: m.type,
+              content: m.content,
+              importance: m.importance,
+              metadata: m.metadata,
+              createdAt: m.createdAt,
+            })),
+          });
+        } catch (error) {
+          this.logger.error(`Failed to recall memory: ${error.message}`);
+          return JSON.stringify({ error: 'Error al buscar en la memoria.' });
+        }
+      }
+
+      case 'forget': {
+        try {
+          const query = toolInput.query as string | undefined;
+          const memoryId = toolInput.memoryId as string | undefined;
+
+          if (memoryId) {
+            const deleted = await this.memoryService.deleteMemory(userId, memoryId);
+            if (deleted) {
+              return JSON.stringify({ success: true, message: 'Memoria eliminada correctamente.' });
+            } else {
+              return JSON.stringify({ success: false, message: 'No se encontró esa memoria.' });
+            }
+          }
+
+          if (query) {
+            const count = await this.memoryService.deleteMemoryByContent(userId, query);
+            if (count > 0) {
+              return JSON.stringify({
+                success: true,
+                message: `Se eliminaron ${count} memoria(s) relacionadas con "${query}".`,
+              });
+            } else {
+              return JSON.stringify({
+                success: false,
+                message: `No encontré memorias relacionadas con "${query}".`,
+              });
+            }
+          }
+
+          return JSON.stringify({ error: 'Debes especificar qué olvidar (query o memoryId).' });
+        } catch (error) {
+          this.logger.error(`Failed to forget memory: ${error.message}`);
+          return JSON.stringify({ error: 'Error al eliminar la memoria.' });
+        }
+      }
+
+      case 'get_memories': {
+        try {
+          const type = toolInput.type as string | undefined;
+          const limit = (toolInput.limit as number) || 20;
+
+          const memories = await this.memoryService.getMemories(
+            userId,
+            type as MemoryType | undefined,
+            limit,
+          );
+
+          if (memories.length === 0) {
+            return JSON.stringify({
+              count: 0,
+              message: type
+                ? `No tienes memorias de tipo "${type}" guardadas.`
+                : 'No tienes memorias guardadas aún.',
+            });
+          }
+
+          // Group by type for better presentation
+          const grouped: Record<string, any[]> = {};
+          for (const m of memories) {
+            if (!grouped[m.type]) grouped[m.type] = [];
+            grouped[m.type].push({
+              id: m.id,
+              content: m.content,
+              importance: m.importance,
+              createdAt: m.createdAt,
+            });
+          }
+
+          return JSON.stringify({
+            count: memories.length,
+            memoriesByType: grouped,
+          });
+        } catch (error) {
+          this.logger.error(`Failed to get memories: ${error.message}`);
+          return JSON.stringify({ error: 'Error al obtener las memorias.' });
         }
       }
 
@@ -1322,7 +1792,9 @@ export class AgentService {
       // Build message history
       const messages: AIMessage[] = await this.buildMessageHistory(conversation.id);
       const tools = this.getTools();
-      const systemPrompt = getSystemPrompt(); // Generate prompt with current date/time
+
+      // Generate system prompt with relevant memories
+      const systemPrompt = await this.getSystemPromptWithMemory(userId, dto.message);
 
       // Call AI provider
       let response = await provider.chat(messages, systemPrompt, tools);

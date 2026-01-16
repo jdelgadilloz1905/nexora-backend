@@ -14,6 +14,7 @@ import { EmailModule } from './modules/email/email.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { MemoryModule } from './modules/memory/memory.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
     CalendarModule,
     AgentModule,
     IntegrationsModule,
+    MemoryModule,
   ],
 })
 export class AppModule {}

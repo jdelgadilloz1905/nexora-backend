@@ -254,4 +254,180 @@ export class GoogleGmailService {
   async searchEmails(userId: string, query: string, maxResults: number = 20): Promise<EmailMessage[]> {
     return this.getEmails(userId, { query, maxResults });
   }
+
+  async getUnreadCount(userId: string): Promise<number> {
+    const gmail = await this.googleService.getGmailClient(userId);
+
+    const response = await gmail.users.messages.list({
+      userId: 'me',
+      q: 'is:unread',
+      labelIds: ['INBOX'],
+      maxResults: 1,
+    });
+
+    return response.data.resultSizeEstimate || 0;
+  }
+
+  async replyToEmail(
+    userId: string,
+    originalMessageId: string,
+    body: string,
+    replyAll: boolean = false,
+  ): Promise<{ id: string; threadId: string }> {
+    const gmail = await this.googleService.getGmailClient(userId);
+
+    // Get original message details
+    const original = await this.getEmailDetail(userId, originalMessageId);
+
+    // Parse the "From" field to extract email
+    const fromMatch = original.from.match(/<([^>]+)>/);
+    const replyTo = fromMatch ? fromMatch[1] : original.from;
+
+    // Build recipients
+    let to = replyTo;
+    let cc = '';
+
+    if (replyAll && original.to.length > 1) {
+      // Include other recipients in CC
+      const otherRecipients = original.to.filter(
+        (email) => !email.includes(replyTo),
+      );
+      if (otherRecipients.length > 0) {
+        cc = otherRecipients.join(', ');
+      }
+    }
+
+    // Add "Re: " prefix if not already present
+    const subject = original.subject.startsWith('Re:')
+      ? original.subject
+      : `Re: ${original.subject}`;
+
+    // Get thread ID for proper threading
+    const threadId = original.threadId;
+
+    // Get Message-ID header for proper threading
+    const messageResponse = await gmail.users.messages.get({
+      userId: 'me',
+      id: originalMessageId,
+      format: 'metadata',
+      metadataHeaders: ['Message-ID'],
+    });
+    const messageIdHeader = messageResponse.data.payload?.headers?.find(
+      (h) => h.name === 'Message-ID',
+    )?.value;
+
+    let emailContent = [
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      'Content-Type: text/plain; charset=utf-8',
+    ];
+
+    if (cc) {
+      emailContent.push(`Cc: ${cc}`);
+    }
+
+    if (messageIdHeader) {
+      emailContent.push(`In-Reply-To: ${messageIdHeader}`);
+      emailContent.push(`References: ${messageIdHeader}`);
+    }
+
+    emailContent.push('', body);
+
+    const raw = Buffer.from(emailContent.join('\n'))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const response = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw,
+        threadId,
+      },
+    });
+
+    this.logger.log(`Reply sent: ${response.data.id} (thread: ${threadId})`);
+
+    return {
+      id: response.data.id!,
+      threadId: response.data.threadId!,
+    };
+  }
+
+  async getThread(userId: string, threadId: string): Promise<EmailMessage[]> {
+    const gmail = await this.googleService.getGmailClient(userId);
+
+    const response = await gmail.users.threads.get({
+      userId: 'me',
+      id: threadId,
+      format: 'metadata',
+      metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+    });
+
+    const messages = response.data.messages || [];
+    const emails: EmailMessage[] = [];
+
+    for (const msg of messages) {
+      const headers = msg.payload?.headers || [];
+      const getHeader = (name: string) =>
+        headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+
+      emails.push({
+        id: msg.id!,
+        threadId: msg.threadId!,
+        from: getHeader('From'),
+        to: getHeader('To').split(',').map((e) => e.trim()),
+        subject: getHeader('Subject') || '(Sin asunto)',
+        snippet: msg.snippet || '',
+        date: new Date(getHeader('Date')),
+        isRead: !msg.labelIds?.includes('UNREAD'),
+        isStarred: msg.labelIds?.includes('STARRED') || false,
+        labels: msg.labelIds || [],
+      });
+    }
+
+    return emails;
+  }
+
+  async createDraft(
+    userId: string,
+    emailData: SendEmailDto,
+  ): Promise<{ id: string; messageId: string }> {
+    const gmail = await this.googleService.getGmailClient(userId);
+
+    const to = Array.isArray(emailData.to) ? emailData.to.join(', ') : emailData.to;
+
+    let emailContent = [
+      `To: ${to}`,
+      `Subject: ${emailData.subject}`,
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      emailData.body,
+    ];
+
+    if (emailData.cc?.length) {
+      emailContent.splice(1, 0, `Cc: ${emailData.cc.join(', ')}`);
+    }
+
+    const raw = Buffer.from(emailContent.join('\n'))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const response = await gmail.users.drafts.create({
+      userId: 'me',
+      requestBody: {
+        message: { raw },
+      },
+    });
+
+    this.logger.log(`Draft created: ${response.data.id}`);
+
+    return {
+      id: response.data.id!,
+      messageId: response.data.message?.id || '',
+    };
+  }
 }
