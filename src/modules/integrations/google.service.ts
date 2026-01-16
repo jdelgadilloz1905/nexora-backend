@@ -2,7 +2,7 @@ import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { google, Auth, calendar_v3, gmail_v1, tasks_v1 } from 'googleapis';
+import { google, Auth, calendar_v3, gmail_v1, tasks_v1, people_v1, drive_v3 } from 'googleapis';
 import { UserIntegration, IntegrationProvider } from './entities/user-integration.entity';
 
 @Injectable()
@@ -17,6 +17,8 @@ export class GoogleService {
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/tasks',
     'https://www.googleapis.com/auth/tasks.readonly',
+    'https://www.googleapis.com/auth/contacts.readonly',
+    'https://www.googleapis.com/auth/drive.readonly',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile',
   ];
@@ -144,6 +146,16 @@ export class GoogleService {
   async getTasksClient(userId: string): Promise<tasks_v1.Tasks> {
     const auth = await this.getAuthenticatedClient(userId);
     return google.tasks({ version: 'v1', auth });
+  }
+
+  async getPeopleClient(userId: string): Promise<people_v1.People> {
+    const auth = await this.getAuthenticatedClient(userId);
+    return google.people({ version: 'v1', auth });
+  }
+
+  async getDriveClient(userId: string): Promise<drive_v3.Drive> {
+    const auth = await this.getAuthenticatedClient(userId);
+    return google.drive({ version: 'v3', auth });
   }
 
   async disconnect(userId: string): Promise<void> {

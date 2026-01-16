@@ -8,6 +8,8 @@ import { GoogleCalendarService, CalendarEvent } from '@/modules/integrations/goo
 import { GoogleGmailService } from '@/modules/integrations/google-gmail.service';
 import { GoogleService } from '@/modules/integrations/google.service';
 import { GoogleTasksService } from '@/modules/integrations/google-tasks.service';
+import { GoogleContactsService } from '@/modules/integrations/google-contacts.service';
+import { GoogleDriveService } from '@/modules/integrations/google-drive.service';
 import { MemoryService } from '@/modules/memory/memory.service';
 import { MemoryType } from '@/modules/memory/entities/user-memory.entity';
 import { Conversation } from './entities/conversation.entity';
@@ -253,6 +255,13 @@ Nunca dejar NOISE sin resolver por mucho tiempo.
 - Crear con hora de inicio y fin
 - Agregar descripción y ubicación
 
+### 📁 GOOGLE DRIVE (Disponible si conectado)
+- Buscar archivos por nombre
+- Ver archivos recientes
+- Listar por tipo (documentos, hojas, presentaciones, carpetas, PDFs)
+- Ver archivos compartidos y destacados
+- Consultar espacio de almacenamiento
+
 ## MANEJO DE EVENTOS DEL CALENDARIO
 
 Cada evento incluye información completa:
@@ -297,9 +306,77 @@ Cada evento incluye información completa:
 ### Correo (requiere conexión con Google)
 - get_emails: Ver correos de la bandeja de entrada
 - get_unread_emails: Ver correos no leídos
-- search_emails: Buscar correos
+- search_emails: Buscar correos por remitente, asunto o contenido
 - send_email: Enviar un correo nuevo
+- reply_email: Responder a un correo existente
+- read_email: Leer el contenido completo de un correo
+- archive_email: Archivar un correo
 - mark_email_read: Marcar correo como leído
+
+### Cuándo usar search_emails:
+- "buscar correo de [persona]" → search_emails con query "from:[persona]"
+- "buscar correos sobre [tema]" → search_emails con query "subject:[tema]"
+- "correos de esta semana" → search_emails con query "newer_than:7d"
+- "tiene correo de [empresa]" → search_emails con query "from:@[empresa].com"
+
+### Contactos (requiere conexión con Google)
+- get_contacts: Ver lista de contactos de Google
+- search_contacts: Buscar contacto por nombre, email o empresa
+
+### Cuándo usar search_contacts:
+- "cuál es el correo de [persona]" → search_contacts para encontrar su email
+- "buscar contacto de [persona]" → search_contacts
+- "datos de [persona]" → search_contacts
+- "teléfono de [empresa]" → search_contacts
+- Si no encuentra en contactos de Google, buscar en memoria con recall
+
+### IMPORTANTE - Diferenciar solicitudes de correo:
+- "buscar correo DE [persona]" = correos ENVIADOS por esa persona → search_emails
+- "cuál es el correo de [persona]" = la DIRECCIÓN de email → primero search_contacts, si no está usar recall
+- "necesito el correo de [persona]" = puede ser ambiguo, pero generalmente quiere la dirección → search_contacts
+- "datos de contacto de [persona]" = buscar info de contacto → search_contacts, si no usar recall
+
+### Google Drive (requiere conexión con Google)
+- search_drive_files: Buscar archivos por nombre
+- list_recent_files: Ver archivos recientes
+- list_drive_files_by_type: Listar documentos, hojas de cálculo, presentaciones, carpetas o PDFs
+- list_shared_files: Ver archivos compartidos conmigo
+- list_starred_files: Ver archivos destacados
+- get_file_info: Información detallada de un archivo
+- get_storage_quota: Ver espacio de almacenamiento
+
+### Cuándo usar tools de Drive:
+- "busca el documento de [tema]" → search_drive_files con query
+- "mis archivos recientes" → list_recent_files
+- "muestra mis hojas de cálculo" → list_drive_files_by_type con fileType: "spreadsheet"
+- "qué documentos tengo" → list_drive_files_by_type con fileType: "document"
+- "archivos compartidos conmigo" → list_shared_files
+- "mis archivos destacados" → list_starred_files
+- "cuánto espacio tengo en Drive" → get_storage_quota
+- "información del archivo [id]" → get_file_info
+
+### Cuándo usar reply_email:
+- "responde al correo de [persona]" → reply_email con searchFrom: "[persona]"
+- "responde diciendo que..." → reply_email con el body correspondiente
+
+## IMPORTANTE: PREVIEW DE CORREOS
+
+SIEMPRE que vayas a enviar o responder un correo:
+1. Primero usa send_email o reply_email con confirmed=false (default)
+2. Muestra el PREVIEW al usuario de forma clara
+3. Pregunta "¿Lo envío?"
+4. Si el usuario confirma ("sí", "dale", "envíalo"), usa el mismo tool con confirmed=true
+5. Si el usuario quiere cambios, ajusta y muestra nuevo preview
+
+Formato del preview:
+---
+📧 **Preview del correo:**
+**Para:** destinatario@email.com
+**Asunto:** El asunto aquí
+**Mensaje:**
+El contenido del correo...
+---
+¿Lo envío o quieres que modifique algo?
 
 ## BRIEFING DIARIO
 
@@ -510,6 +587,8 @@ export class AgentService {
     private readonly calendarService: GoogleCalendarService,
     private readonly gmailService: GoogleGmailService,
     private readonly googleTasksService: GoogleTasksService,
+    private readonly contactsService: GoogleContactsService,
+    private readonly driveService: GoogleDriveService,
     private readonly memoryService: MemoryService,
     @InjectRepository(Conversation)
     private readonly conversationRepository: Repository<Conversation>,
@@ -898,7 +977,7 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
       },
       {
         name: 'send_email',
-        description: 'Envía un correo electrónico a través de Gmail.',
+        description: 'Prepara o envía un correo. SIEMPRE usa confirmed=false primero para mostrar preview al usuario, luego confirmed=true para enviar.',
         parameters: {
           type: 'object',
           properties: {
@@ -917,6 +996,10 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
             cc: {
               type: 'string',
               description: 'Lista de correos en copia separados por coma',
+            },
+            confirmed: {
+              type: 'boolean',
+              description: 'false = mostrar preview sin enviar (default), true = enviar después de que el usuario confirme',
             },
           },
           required: ['to', 'subject', 'body'],
@@ -938,13 +1021,21 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
       },
       {
         name: 'reply_email',
-        description: 'Responde a un correo existente manteniendo el hilo de conversación.',
+        description: 'Prepara o responde a un correo. SIEMPRE usa confirmed=false primero para mostrar preview, luego confirmed=true para enviar.',
         parameters: {
           type: 'object',
           properties: {
             messageId: {
               type: 'string',
-              description: 'ID del correo original al que responder',
+              description: 'ID del correo original al que responder (opcional si usas searchFrom o searchSubject)',
+            },
+            searchFrom: {
+              type: 'string',
+              description: 'Buscar correo por remitente (nombre o email) para responder',
+            },
+            searchSubject: {
+              type: 'string',
+              description: 'Buscar correo por asunto para responder',
             },
             body: {
               type: 'string',
@@ -954,8 +1045,12 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
               type: 'boolean',
               description: 'Responder a todos los destinatarios (default: false)',
             },
+            confirmed: {
+              type: 'boolean',
+              description: 'false = mostrar preview sin enviar (default), true = enviar después de que el usuario confirme',
+            },
           },
-          required: ['messageId', 'body'],
+          required: ['body'],
         },
       },
       {
@@ -989,6 +1084,147 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
       {
         name: 'get_unread_count',
         description: 'Obtiene el número de correos sin leer en la bandeja de entrada.',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: [],
+        },
+      },
+      // Google Contacts Tools
+      {
+        name: 'get_contacts',
+        description: 'Obtiene la lista de contactos de Google del usuario. Útil para ver los contactos guardados.',
+        parameters: {
+          type: 'object',
+          properties: {
+            maxResults: {
+              type: 'number',
+              description: 'Número máximo de contactos (default: 20)',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'search_contacts',
+        description: 'Busca contactos de Google por nombre, email o empresa. Útil para encontrar información de contacto de una persona.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Nombre, email o empresa del contacto a buscar',
+            },
+            maxResults: {
+              type: 'number',
+              description: 'Número máximo de resultados (default: 10)',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      // Google Drive Tools
+      {
+        name: 'search_drive_files',
+        description: 'Busca archivos en Google Drive por nombre. Útil para encontrar documentos, hojas de cálculo, presentaciones, etc.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Término de búsqueda (nombre del archivo)',
+            },
+            maxResults: {
+              type: 'number',
+              description: 'Número máximo de resultados (default: 10)',
+            },
+            fileType: {
+              type: 'string',
+              enum: ['document', 'spreadsheet', 'presentation', 'folder', 'pdf'],
+              description: 'Filtrar por tipo de archivo (opcional)',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'list_recent_files',
+        description: 'Lista los archivos recientes de Google Drive del usuario.',
+        parameters: {
+          type: 'object',
+          properties: {
+            maxResults: {
+              type: 'number',
+              description: 'Número máximo de resultados (default: 10)',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'list_drive_files_by_type',
+        description: 'Lista archivos de Google Drive por tipo (documentos, hojas de cálculo, presentaciones, carpetas, PDFs).',
+        parameters: {
+          type: 'object',
+          properties: {
+            fileType: {
+              type: 'string',
+              enum: ['document', 'spreadsheet', 'presentation', 'folder', 'pdf'],
+              description: 'Tipo de archivo a listar',
+            },
+            maxResults: {
+              type: 'number',
+              description: 'Número máximo de resultados (default: 10)',
+            },
+          },
+          required: ['fileType'],
+        },
+      },
+      {
+        name: 'list_shared_files',
+        description: 'Lista los archivos compartidos con el usuario en Google Drive.',
+        parameters: {
+          type: 'object',
+          properties: {
+            maxResults: {
+              type: 'number',
+              description: 'Número máximo de resultados (default: 10)',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'list_starred_files',
+        description: 'Lista los archivos destacados (con estrella) del usuario en Google Drive.',
+        parameters: {
+          type: 'object',
+          properties: {
+            maxResults: {
+              type: 'number',
+              description: 'Número máximo de resultados (default: 10)',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'get_file_info',
+        description: 'Obtiene información detallada de un archivo específico de Google Drive.',
+        parameters: {
+          type: 'object',
+          properties: {
+            fileId: {
+              type: 'string',
+              description: 'ID del archivo en Google Drive',
+            },
+          },
+          required: ['fileId'],
+        },
+      },
+      {
+        name: 'get_storage_quota',
+        description: 'Obtiene información sobre el espacio de almacenamiento de Google Drive del usuario.',
         parameters: {
           type: 'object',
           properties: {},
@@ -1497,12 +1733,31 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
 
       case 'send_email': {
         try {
+          const to = toolInput.to as string;
+          const subject = toolInput.subject as string;
+          const body = toolInput.body as string;
           const ccStr = toolInput.cc as string;
           const cc = ccStr ? ccStr.split(',').map(e => e.trim()) : undefined;
+          const confirmed = toolInput.confirmed === true;
+
+          // If not confirmed, show preview only
+          if (!confirmed) {
+            return JSON.stringify({
+              preview: true,
+              message: 'PREVIEW del correo (no enviado aún):',
+              to,
+              subject,
+              body,
+              cc: cc || [],
+              instruction: 'Muestra este preview al usuario y pregunta si desea enviarlo. Si confirma, usa send_email con confirmed=true',
+            });
+          }
+
+          // Confirmed - send the email
           const result = await this.gmailService.sendEmail(userId, {
-            to: toolInput.to as string,
-            subject: toolInput.subject as string,
-            body: toolInput.body as string,
+            to,
+            subject,
+            body,
             cc,
           });
           return JSON.stringify({
@@ -1531,27 +1786,124 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
           });
         } catch (error) {
           this.logger.error(`Failed to read email: ${error.message}`);
-          return JSON.stringify({ error: 'No se pudo leer el correo. Google no conectado o correo no encontrado.' });
+          if (error.message?.includes('not found') || error.message?.includes('Not Found')) {
+            return JSON.stringify({
+              error: 'El correo no fue encontrado. Puede que haya sido eliminado o el ID sea incorrecto.',
+              suggestion: 'Usa get_emails para obtener los correos actuales.'
+            });
+          }
+          return JSON.stringify({ error: 'No se pudo leer el correo. Verifica que Google esté conectado.' });
         }
       }
 
       case 'reply_email': {
         try {
-          const messageId = toolInput.messageId as string;
+          let messageId = toolInput.messageId as string;
           const body = toolInput.body as string;
           const replyAll = (toolInput.replyAll as boolean) || false;
+          const searchFrom = toolInput.searchFrom as string;
+          const searchSubject = toolInput.searchSubject as string;
+          const confirmed = toolInput.confirmed === true;
 
-          const result = await this.gmailService.replyToEmail(userId, messageId, body, replyAll);
+          // Helper function to find email by search
+          const findEmailBySearch = async (): Promise<{ id: string; from: string; subject: string } | null> => {
+            let searchQuery = '';
+            if (searchFrom) {
+              searchQuery += `from:${searchFrom} `;
+            }
+            if (searchSubject) {
+              searchQuery += `subject:${searchSubject} `;
+            }
 
-          return JSON.stringify({
-            success: true,
-            message: 'Respuesta enviada correctamente',
-            messageId: result.id,
-            threadId: result.threadId,
-          });
+            const emails = await this.gmailService.getEmails(userId, {
+              query: searchQuery.trim() || undefined,
+              maxResults: 5,
+              labelIds: ['INBOX'],
+            });
+
+            if (emails.length > 0) {
+              this.logger.log(`Found email to reply: ${emails[0].id} from ${emails[0].from}`);
+              return { id: emails[0].id, from: emails[0].from, subject: emails[0].subject };
+            }
+            return null;
+          };
+
+          // Find the original email first
+          let originalEmail: { id: string; from: string; subject: string } | null = null;
+
+          if (searchFrom || searchSubject) {
+            this.logger.debug(`Searching for email to reply: from=${searchFrom}, subject=${searchSubject}`);
+            originalEmail = await findEmailBySearch();
+            if (originalEmail) {
+              messageId = originalEmail.id;
+            } else {
+              return JSON.stringify({
+                error: `No se encontró ningún correo${searchFrom ? ` de ${searchFrom}` : ''}${searchSubject ? ` con asunto "${searchSubject}"` : ''}`,
+                suggestion: 'Verifica el remitente o asunto del correo'
+              });
+            }
+          } else if (messageId) {
+            // Get original email details for preview
+            try {
+              const emailDetail = await this.gmailService.getEmailDetail(userId, messageId);
+              originalEmail = { id: emailDetail.id, from: emailDetail.from, subject: emailDetail.subject };
+            } catch (e) {
+              // Will handle in the send phase
+            }
+          }
+
+          // If not confirmed, show preview only
+          if (!confirmed) {
+            return JSON.stringify({
+              preview: true,
+              message: 'PREVIEW de respuesta (no enviada aún):',
+              respondingTo: originalEmail ? {
+                from: originalEmail.from,
+                subject: originalEmail.subject,
+              } : { note: 'Correo original no encontrado para preview' },
+              body,
+              replyAll,
+              instruction: 'Muestra este preview al usuario y pregunta si desea enviarlo. Si confirma, usa reply_email con confirmed=true y los mismos parámetros',
+            });
+          }
+
+          // Confirmed - send the reply
+          try {
+            const result = await this.gmailService.replyToEmail(userId, messageId, body, replyAll);
+            return JSON.stringify({
+              success: true,
+              message: 'Respuesta enviada correctamente',
+              messageId: result.id,
+              threadId: result.threadId,
+            });
+          } catch (replyError: any) {
+            // If messageId failed and we have search params, try searching
+            if ((replyError.message?.includes('not found') || replyError.message?.includes('Not Found')) &&
+                (searchFrom || searchSubject)) {
+              this.logger.warn(`MessageId ${messageId} not found, trying search fallback...`);
+              const foundEmail = await findEmailBySearch();
+              if (foundEmail && foundEmail.id !== messageId) {
+                const result = await this.gmailService.replyToEmail(userId, foundEmail.id, body, replyAll);
+                return JSON.stringify({
+                  success: true,
+                  message: 'Respuesta enviada correctamente (encontrado por búsqueda)',
+                  messageId: result.id,
+                  threadId: result.threadId,
+                });
+              }
+            }
+            throw replyError;
+          }
         } catch (error) {
           this.logger.error(`Failed to reply email: ${error.message}`);
-          return JSON.stringify({ error: 'No se pudo enviar la respuesta. Google no conectado o correo no encontrado.' });
+          // Distinguish between "not found" and other errors
+          if (error.message?.includes('not found') || error.message?.includes('Not Found')) {
+            return JSON.stringify({
+              error: 'El correo no fue encontrado. Puede que haya sido eliminado o el ID sea incorrecto.',
+              suggestion: 'Usa searchFrom con el nombre del remitente para buscar el correo'
+            });
+          }
+          return JSON.stringify({ error: 'No se pudo enviar la respuesta. Verifica que Google esté conectado.' });
         }
       }
 
@@ -1586,6 +1938,271 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
           });
         } catch (error) {
           return JSON.stringify({ error: 'Google no conectado.' });
+        }
+      }
+
+      // Google Contacts Tools
+      case 'get_contacts': {
+        try {
+          const maxResults = (toolInput.maxResults as number) || 20;
+          const { contacts } = await this.contactsService.getContacts(userId, { pageSize: maxResults });
+          if (contacts.length === 0) {
+            return 'No tienes contactos guardados en Google.';
+          }
+          return JSON.stringify(contacts.map(c => ({
+            nombre: c.name,
+            email: c.email || 'Sin email',
+            telefono: c.phone || 'Sin teléfono',
+            empresa: c.company || undefined,
+            cargo: c.jobTitle || undefined,
+          })));
+        } catch (error) {
+          this.logger.error(`Failed to get contacts: ${error.message}`);
+          return JSON.stringify({ error: 'Google no conectado o no tienes permisos de contactos. El usuario debe reconectar Google.' });
+        }
+      }
+
+      case 'search_contacts': {
+        try {
+          const query = toolInput.query as string;
+          const maxResults = (toolInput.maxResults as number) || 10;
+          const contacts = await this.contactsService.searchContacts(userId, query, maxResults);
+          if (contacts.length === 0) {
+            return JSON.stringify({
+              found: false,
+              message: `No encontré contactos que coincidan con "${query}"`,
+              suggestion: 'Puedo buscar en mi memoria o puedes darme los datos del contacto para guardarlo.'
+            });
+          }
+          return JSON.stringify({
+            found: true,
+            count: contacts.length,
+            contacts: contacts.map(c => ({
+              nombre: c.name,
+              email: c.email || 'Sin email',
+              telefono: c.phone || 'Sin teléfono',
+              empresa: c.company || undefined,
+              cargo: c.jobTitle || undefined,
+            })),
+          });
+        } catch (error) {
+          this.logger.error(`Failed to search contacts: ${error.message}`);
+          return JSON.stringify({ error: 'Google no conectado o no tienes permisos de contactos.' });
+        }
+      }
+
+      // Google Drive Tools
+      case 'search_drive_files': {
+        try {
+          const query = toolInput.query as string;
+          const maxResults = (toolInput.maxResults as number) || 10;
+          const fileType = toolInput.fileType as 'document' | 'spreadsheet' | 'presentation' | 'folder' | 'pdf' | undefined;
+
+          let files;
+          if (fileType) {
+            // If fileType specified, filter by type
+            files = await this.driveService.searchFiles(userId, query, {
+              maxResults,
+              mimeType: this.getMimeTypeForDrive(fileType),
+            });
+          } else {
+            files = await this.driveService.searchFiles(userId, query, { maxResults });
+          }
+
+          if (files.length === 0) {
+            return JSON.stringify({
+              found: false,
+              message: `No encontré archivos que coincidan con "${query}"`,
+            });
+          }
+
+          return JSON.stringify({
+            found: true,
+            count: files.length,
+            files: files.map(f => ({
+              id: f.id,
+              nombre: f.name,
+              tipo: this.driveService.getFriendlyTypeName(f.mimeType),
+              link: f.webViewLink,
+              modificado: f.modifiedTime?.toLocaleDateString('es-ES'),
+              tamaño: f.size,
+              compartido: f.shared,
+              destacado: f.starred,
+            })),
+          });
+        } catch (error) {
+          this.logger.error(`Failed to search Drive files: ${error.message}`);
+          return JSON.stringify({ error: 'Google Drive no conectado o sin permisos.' });
+        }
+      }
+
+      case 'list_recent_files': {
+        try {
+          const maxResults = (toolInput.maxResults as number) || 10;
+          const files = await this.driveService.listRecentFiles(userId, maxResults);
+
+          if (files.length === 0) {
+            return JSON.stringify({
+              message: 'No hay archivos recientes en tu Drive.',
+            });
+          }
+
+          return JSON.stringify({
+            count: files.length,
+            files: files.map(f => ({
+              id: f.id,
+              nombre: f.name,
+              tipo: this.driveService.getFriendlyTypeName(f.mimeType),
+              link: f.webViewLink,
+              modificado: f.modifiedTime?.toLocaleDateString('es-ES'),
+              tamaño: f.size,
+            })),
+          });
+        } catch (error) {
+          this.logger.error(`Failed to list recent files: ${error.message}`);
+          return JSON.stringify({ error: 'Google Drive no conectado o sin permisos.' });
+        }
+      }
+
+      case 'list_drive_files_by_type': {
+        try {
+          const fileType = toolInput.fileType as 'document' | 'spreadsheet' | 'presentation' | 'folder' | 'pdf';
+          const maxResults = (toolInput.maxResults as number) || 10;
+          const files = await this.driveService.listFilesByType(userId, fileType, maxResults);
+
+          const typeNames: Record<string, string> = {
+            document: 'documentos',
+            spreadsheet: 'hojas de cálculo',
+            presentation: 'presentaciones',
+            folder: 'carpetas',
+            pdf: 'PDFs',
+          };
+
+          if (files.length === 0) {
+            return JSON.stringify({
+              message: `No tienes ${typeNames[fileType]} en tu Drive.`,
+            });
+          }
+
+          return JSON.stringify({
+            type: typeNames[fileType],
+            count: files.length,
+            files: files.map(f => ({
+              id: f.id,
+              nombre: f.name,
+              link: f.webViewLink,
+              modificado: f.modifiedTime?.toLocaleDateString('es-ES'),
+              tamaño: f.size,
+            })),
+          });
+        } catch (error) {
+          this.logger.error(`Failed to list files by type: ${error.message}`);
+          return JSON.stringify({ error: 'Google Drive no conectado o sin permisos.' });
+        }
+      }
+
+      case 'list_shared_files': {
+        try {
+          const maxResults = (toolInput.maxResults as number) || 10;
+          const files = await this.driveService.listSharedWithMe(userId, maxResults);
+
+          if (files.length === 0) {
+            return JSON.stringify({
+              message: 'No tienes archivos compartidos contigo.',
+            });
+          }
+
+          return JSON.stringify({
+            count: files.length,
+            files: files.map(f => ({
+              id: f.id,
+              nombre: f.name,
+              tipo: this.driveService.getFriendlyTypeName(f.mimeType),
+              link: f.webViewLink,
+              propietarios: f.owners,
+              modificado: f.modifiedTime?.toLocaleDateString('es-ES'),
+            })),
+          });
+        } catch (error) {
+          this.logger.error(`Failed to list shared files: ${error.message}`);
+          return JSON.stringify({ error: 'Google Drive no conectado o sin permisos.' });
+        }
+      }
+
+      case 'list_starred_files': {
+        try {
+          const maxResults = (toolInput.maxResults as number) || 10;
+          const files = await this.driveService.listStarredFiles(userId, maxResults);
+
+          if (files.length === 0) {
+            return JSON.stringify({
+              message: 'No tienes archivos destacados.',
+            });
+          }
+
+          return JSON.stringify({
+            count: files.length,
+            files: files.map(f => ({
+              id: f.id,
+              nombre: f.name,
+              tipo: this.driveService.getFriendlyTypeName(f.mimeType),
+              link: f.webViewLink,
+              modificado: f.modifiedTime?.toLocaleDateString('es-ES'),
+            })),
+          });
+        } catch (error) {
+          this.logger.error(`Failed to list starred files: ${error.message}`);
+          return JSON.stringify({ error: 'Google Drive no conectado o sin permisos.' });
+        }
+      }
+
+      case 'get_file_info': {
+        try {
+          const fileId = toolInput.fileId as string;
+          const file = await this.driveService.getFileInfo(userId, fileId);
+
+          if (!file) {
+            return JSON.stringify({
+              error: 'Archivo no encontrado o sin permisos para acceder.',
+            });
+          }
+
+          return JSON.stringify({
+            id: file.id,
+            nombre: file.name,
+            tipo: this.driveService.getFriendlyTypeName(file.mimeType),
+            descripcion: file.description,
+            link: file.webViewLink,
+            creado: file.createdTime?.toLocaleDateString('es-ES'),
+            modificado: file.modifiedTime?.toLocaleDateString('es-ES'),
+            tamaño: file.size,
+            propietarios: file.owners,
+            compartido: file.shared,
+            destacado: file.starred,
+            permisos: file.permissions?.map(p => ({
+              email: p.email,
+              rol: p.role === 'owner' ? 'Propietario' : p.role === 'writer' ? 'Editor' : p.role === 'reader' ? 'Lector' : p.role,
+            })),
+          });
+        } catch (error) {
+          this.logger.error(`Failed to get file info: ${error.message}`);
+          return JSON.stringify({ error: 'Google Drive no conectado o sin permisos.' });
+        }
+      }
+
+      case 'get_storage_quota': {
+        try {
+          const quota = await this.driveService.getStorageQuota(userId);
+
+          return JSON.stringify({
+            usado: quota.used,
+            total: quota.total,
+            usadoEnDrive: quota.usedInDrive,
+            enPapelera: quota.usedInTrash,
+          });
+        } catch (error) {
+          this.logger.error(`Failed to get storage quota: ${error.message}`);
+          return JSON.stringify({ error: 'Google Drive no conectado o sin permisos.' });
         }
       }
 
@@ -1749,6 +2366,17 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
       default:
         return JSON.stringify({ error: 'Herramienta no reconocida' });
     }
+  }
+
+  private getMimeTypeForDrive(fileType: 'document' | 'spreadsheet' | 'presentation' | 'folder' | 'pdf'): string {
+    const mimeTypes: Record<string, string> = {
+      document: 'application/vnd.google-apps.document',
+      spreadsheet: 'application/vnd.google-apps.spreadsheet',
+      presentation: 'application/vnd.google-apps.presentation',
+      folder: 'application/vnd.google-apps.folder',
+      pdf: 'application/pdf',
+    };
+    return mimeTypes[fileType];
   }
 
   async chat(userId: string, dto: ChatMessageDto): Promise<AgentResponseDto> {

@@ -754,4 +754,200 @@ src/app.module.ts                                 [IMPORT MEMORY]
 
 **Documento creado**: 2026-01-15
 **Autor**: Claude + Usuario
-**Estado**: Listo para implementación
+**Estado**: ✅ Implementado (Fases 1 y 2 completadas)
+
+---
+
+## Parte 7: Estado de Implementación
+
+### ✅ Completado (2026-01-15)
+
+#### Gmail Integration
+- [x] `getEmails` - Obtener correos de bandeja
+- [x] `getUnreadEmails` - Correos no leídos
+- [x] `getEmailDetail` - Leer contenido completo
+- [x] `sendEmail` - Enviar correos nuevos
+- [x] `replyToEmail` - Responder con threading correcto
+- [x] `searchEmails` - Búsqueda con query Gmail
+- [x] `archiveEmail` - Archivar correos
+- [x] `markAsRead/Unread` - Marcar leído/no leído
+- [x] `getThread` - Obtener hilo completo
+- [x] `createDraft` - Crear borradores
+- [x] `getUnreadCount` - Contador de no leídos
+
+#### Memory System
+- [x] Entity `UserMemory` con 8 tipos de memoria
+- [x] `createMemory` - Guardar memorias (con deduplicación)
+- [x] `searchMemories` - Búsqueda por keywords (OR)
+- [x] `getMemories` - Listar memorias por tipo
+- [x] `getRelevantMemories` - Memorias relevantes para contexto
+- [x] `deleteMemory` / `deleteMemoryByContent` - Eliminar
+- [x] `getMemoryStats` - Estadísticas
+- [x] `exportMemories` / `deleteAllMemories` - GDPR compliance
+- [x] Integración con System Prompt (inyección de memorias)
+
+#### Agent Tools
+- [x] `remember` - Guardar memoria
+- [x] `recall` - Buscar en memoria
+- [x] `forget` - Eliminar memoria
+- [x] `get_memories` - Listar memorias
+- [x] `read_email` - Leer correo completo
+- [x] `reply_email` - Responder correo
+- [x] `archive_email` - Archivar
+- [x] `get_unread_count` - Contador no leídos
+
+---
+
+## Parte 8: Próximos Pasos (Diferidos)
+
+### 🔮 Funcionalidades Futuras
+
+Estas funcionalidades están planificadas pero diferidas para desarrollo futuro:
+
+#### 1. Proactividad Inteligente
+- **Descripción**: Nexora sugiere acciones sin que el usuario las pida
+- **Ejemplos**:
+  - "Vi que tienes una reunión con Juan en 30 minutos. ¿Quieres que te prepare un resumen?"
+  - "Tienes 3 tareas vencidas de la semana pasada. ¿Las reprogramamos?"
+  - "María te envió un correo urgente hace 2 horas. ¿Lo revisamos?"
+- **Requisitos técnicos**:
+  - Cron job para análisis periódico
+  - WebSocket para notificaciones en tiempo real
+  - Sistema de priorización de alertas
+  - Configuración de preferencias de notificación por usuario
+
+#### 2. Auto-Memory (Extracción Automática)
+- **Descripción**: Extraer memorias automáticamente de las conversaciones
+- **Implementación sugerida**:
+  ```typescript
+  async extractMemoriesFromConversation(userId: string, messages: Message[]): Promise<void> {
+    const extractionPrompt = `Analiza esta conversación y extrae información memorable...`;
+    // Usar LLM para identificar preferencias, contactos, proyectos mencionados
+    // Guardar automáticamente con confidence < 1.0
+  }
+  ```
+- **Triggers**:
+  - Al finalizar cada conversación
+  - Cuando se detectan patrones específicos (nombres, emails, fechas)
+- **Configuración**:
+  - Toggle para activar/desactivar
+  - Nivel de confianza mínimo para auto-guardar
+
+#### 3. Microsoft 365 Integration
+- **Descripción**: Integrar Outlook, Teams, OneDrive
+- **Componentes**:
+  - OAuth 2.0 con Microsoft Graph API
+  - `OutlookService` - Correos y calendario
+  - `TeamsService` - Chat y reuniones
+  - `OneDriveService` - Archivos
+- **Consideraciones**:
+  - Diferentes scopes de permisos
+  - Rate limits de Graph API
+  - Soporte para cuentas personales y de trabajo
+
+#### 4. Workflows Automatizados
+- **Descripción**: Secuencias de acciones automáticas
+- **Ejemplos**:
+  - "Cuando reciba un correo de [cliente], crea una tarea y notifícame"
+  - "Todos los viernes a las 5pm, envía resumen semanal al equipo"
+  - "Si una tarea está vencida por 3 días, enviar recordatorio"
+- **Arquitectura**:
+  ```
+  WorkflowEntity {
+    trigger: TriggerType (email, calendar, time, task)
+    conditions: Condition[]
+    actions: Action[]
+    isActive: boolean
+  }
+  ```
+- **Requisitos**:
+  - Motor de reglas
+  - Cola de trabajos (Bull/BullMQ)
+  - UI para crear workflows
+
+#### 5. Búsqueda Semántica con Embeddings
+- **Descripción**: Mejorar búsqueda de memorias usando vectores
+- **Implementación**:
+  - Agregar columna `embedding VECTOR(1536)` a UserMemory
+  - Usar OpenAI/Cohere embeddings
+  - Búsqueda por similitud coseno con pgvector
+- **Beneficios**:
+  - Encontrar memorias por significado, no solo keywords
+  - "¿Qué sé sobre productividad?" encuentra preferencias de reuniones, estilo de trabajo, etc.
+
+#### 6. Voice Interface
+- **Descripción**: Interactuar con Nexora por voz
+- **Componentes**:
+  - Speech-to-Text (Whisper, Google Speech)
+  - Text-to-Speech (ElevenLabs, Google TTS)
+  - Wake word detection
+- **Integraciones**:
+  - Alexa Skill
+  - Google Assistant Action
+  - App móvil con push-to-talk
+
+---
+
+## Parte 9: Casos de Prueba Gmail
+
+### Validación de Funcionalidades
+
+#### 1. Obtener correos no leídos
+```
+Prompt: "¿Tengo correos sin leer?"
+        "¿Cuántos emails nuevos tengo?"
+        "Muéstrame mis correos no leídos"
+Esperado: Lista de correos con remitente, asunto, fecha
+```
+
+#### 2. Leer correo específico
+```
+Prompt: "Lee el primer correo"
+        "¿De qué trata el correo de [nombre]?"
+        "Muéstrame el contenido del email sobre [tema]"
+Esperado: Contenido completo del correo seleccionado
+```
+
+#### 3. Enviar correo nuevo
+```
+Prompt: "Envía un correo a test@example.com con asunto 'Prueba' diciendo 'Hola'"
+        "Escribe un email a [contacto] diciendo que confirmo la cita"
+Esperado: Confirmación de envío con ID del mensaje
+Verificar: El correo llega correctamente al destinatario
+```
+
+#### 4. Responder a correo
+```
+Prompt: "Responde al último correo diciendo 'Gracias, lo revisaré'"
+        "Responde al correo de [nombre] confirmando asistencia"
+Esperado: Respuesta en el mismo hilo (thread)
+Verificar: El threading funciona (In-Reply-To header)
+```
+
+#### 5. Buscar correos
+```
+Prompt: "Busca correos de [remitente]"
+        "¿Tengo emails sobre [tema]?"
+        "Busca correos con 'factura' en el asunto"
+Esperado: Lista filtrada de correos que coinciden
+```
+
+#### 6. Archivar correo
+```
+Prompt: "Archiva el correo de [remitente]"
+        "Archiva el último email"
+Esperado: Correo movido fuera de inbox
+Verificar: Ya no aparece en bandeja de entrada
+```
+
+#### 7. Integración con Memoria
+```
+Prompt 1: "Recuerda que el correo de María es maria@empresa.com"
+Prompt 2: "Envía un correo a María preguntando por el proyecto"
+Esperado: Nexora usa la memoria para encontrar el email y enviar
+```
+
+---
+
+**Última actualización**: 2026-01-15
+**Siguiente revisión**: Cuando se implemente alguna funcionalidad diferida
