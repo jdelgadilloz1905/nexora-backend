@@ -2481,9 +2481,9 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
       // Extract text response - handle empty string case
       let assistantMessage = response.content;
       if (!assistantMessage || assistantMessage.trim() === '') {
-        this.logger.warn('AI returned empty response after tool execution');
-        // If we had tool results, try to generate a fallback based on them
-        assistantMessage = 'Lo siento, no pude procesar tu solicitud. Por favor intenta de nuevo.';
+        this.logger.error(`AI returned empty response after ${retryCount} retry attempts`);
+        // Provide a clear error message to the user
+        assistantMessage = '⚠️ Tuve un problema temporal conectando con el servicio. Por favor, intenta de nuevo en unos segundos.';
       }
 
       // Save assistant message
