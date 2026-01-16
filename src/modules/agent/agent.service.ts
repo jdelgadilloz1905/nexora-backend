@@ -2424,8 +2424,23 @@ Lo que sabes sobre este usuario (usa esta información para personalizar tus res
       // Generate system prompt with relevant memories
       const systemPrompt = await this.getSystemPromptWithMemory(userId, dto.message);
 
-      // Call AI provider
-      let response = await provider.chat(messages, systemPrompt, tools);
+      // Call AI provider with retry on empty response
+      let response: AIResponse;
+      let retryCount = 0;
+      const maxRetries = 2;
+
+      do {
+        if (retryCount > 0) {
+          this.logger.warn(`Retrying AI call (attempt ${retryCount + 1}/${maxRetries + 1})...`);
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        }
+        response = await provider.chat(messages, systemPrompt, tools);
+        retryCount++;
+      } while (
+        (!response.content || response.content.trim() === '') &&
+        response.stopReason !== 'tool_use' &&
+        retryCount <= maxRetries
+      );
 
       // Handle tool use loop
       let toolIterations = 0;
