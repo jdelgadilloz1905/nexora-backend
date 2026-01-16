@@ -215,9 +215,15 @@ export class GeminiProvider implements IAIProvider {
     const response = result.response;
     const toolCalls: AIToolCall[] = [];
 
+    // Log raw response for debugging
+    const candidates = response.candidates;
+    const finishReason = candidates?.[0]?.finishReason;
+    this.logger.debug(`Gemini raw response: finishReason=${finishReason}, candidatesCount=${candidates?.length || 0}`);
+
     // Check for function calls
     const functionCalls = response.functionCalls?.();
     if (functionCalls && functionCalls.length > 0) {
+      this.logger.debug(`Gemini function calls: ${functionCalls.map(fc => fc.name).join(', ')}`);
       for (let i = 0; i < functionCalls.length; i++) {
         const fc = functionCalls[i];
         toolCalls.push({
@@ -236,7 +242,6 @@ export class GeminiProvider implements IAIProvider {
       this.logger.debug(`Could not get text from response: ${error.message}`);
 
       // Try to extract text from parts directly
-      const candidates = response.candidates;
       if (candidates && candidates.length > 0) {
         const parts = candidates[0].content?.parts || [];
         for (const part of parts) {
@@ -244,6 +249,15 @@ export class GeminiProvider implements IAIProvider {
             content += part.text;
           }
         }
+      }
+    }
+
+    // Log if content is empty but no tool calls
+    if (!content && toolCalls.length === 0) {
+      this.logger.warn(`Gemini returned empty response with no tool calls. finishReason=${finishReason}`);
+      // Log parts for debugging
+      if (candidates?.[0]?.content?.parts) {
+        this.logger.debug(`Gemini parts: ${JSON.stringify(candidates[0].content.parts)}`);
       }
     }
 
